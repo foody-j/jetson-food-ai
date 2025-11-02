@@ -12,8 +12,14 @@ plotly>=5.17.0
 # Serial Communication (RS485)
 pyserial>=3.5
 
+# MQTT Communication
+paho-mqtt>=1.6.1
+
 # Data Analysis
 numpy>=1.19.0
+
+# System Monitoring
+psutil>=5.8.0
 
 # Computer Vision (if camera monitoring is used)
 opencv-python>=4.5.0

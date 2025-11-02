@@ -19,7 +19,12 @@ import time
 import os
 import json
 import threading
-import paho.mqtt.client as mqtt
+import sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.communication.mqtt_client import MQTTClient
+from src.core.system_info import SystemInfo
 
 # =========================
 # Load Configuration
@@ -68,22 +73,29 @@ MOG2_VARTHRESH = 16
 BINARY_THRESH = 200
 WARMUP_FRAMES = 30
 
-# GUI Configuration
-WINDOW_WIDTH = 1400
-WINDOW_HEIGHT = 900
-LARGE_FONT = ("NanumGothic", 24, "bold")
-MEDIUM_FONT = ("NanumGothic", 18)
-NORMAL_FONT = ("NanumGothic", 14)
-STATUS_FONT = ("NanumGothic", 16, "bold")
+# GUI Configuration - Auto-adaptive for any display size
+# These are fallback values - will be auto-calculated based on screen
+WINDOW_WIDTH = 720        # Fallback
+WINDOW_HEIGHT = 1280      # Fallback
+LARGE_FONT = ("NanumGothic", 32, "bold")     # Will auto-scale
+MEDIUM_FONT = ("NanumGothic", 24)            # Will auto-scale
+NORMAL_FONT = ("NanumGothic", 18)            # Will auto-scale
+STATUS_FONT = ("NanumGothic", 20, "bold")    # Will auto-scale
+BUTTON_FONT = ("NanumGothic", 22, "bold")    # Will auto-scale
 
-# Colors
-COLOR_OK = "#4CAF50"      # Green
-COLOR_ERROR = "#F44336"   # Red
-COLOR_WARNING = "#FFC107" # Yellow
-COLOR_INFO = "#2196F3"    # Blue
-COLOR_BG = "#263238"      # Dark gray
-COLOR_PANEL = "#37474F"   # Medium gray
-COLOR_TEXT = "#FFFFFF"    # White
+# Colors - Premium/Luxury Theme
+COLOR_OK = "#00C853"      # Vibrant Green
+COLOR_ERROR = "#D32F2F"   # Deep Red
+COLOR_WARNING = "#F57C00" # Deep Orange
+COLOR_INFO = "#1976D2"    # Deep Blue
+COLOR_BG = "#FAFAFA"      # Off-white background
+COLOR_PANEL = "#FFFFFF"   # Pure white panels
+COLOR_PANEL_BORDER = "#E0E0E0"  # Subtle border
+COLOR_TEXT = "#263238"    # Charcoal text
+COLOR_TEXT_LIGHT = "#607D8B"  # Light gray text
+COLOR_ACCENT = "#6200EA"  # Purple accent
+COLOR_BUTTON = "#1976D2"  # Blue buttons
+COLOR_BUTTON_HOVER = "#1565C0"  # Darker blue on hover
 
 print("[초기화] Jetson #1 통합 시스템 시작 중...")
 print(f"[설정] 자동 ON/OFF: {FORCE_MODE or '자동'} | {DAY_START.strftime('%H:%M')}~{DAY_END.strftime('%H:%M')}")
@@ -98,19 +110,26 @@ class IntegratedMonitorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("ROBOTCAM 통합 시스템 - Jetson #1")
-        self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+
+        # Auto-detect screen size
+        self.detect_screen_size()
+
         self.root.configure(bg=COLOR_BG)
 
-        # Try fullscreen (can exit with Escape)
+        # Enable fullscreen by default (can exit with Escape)
         try:
-            self.root.attributes('-fullscreen', False)
+            self.root.attributes('-fullscreen', True)
             self.root.bind("<Escape>", lambda e: self.root.attributes('-fullscreen', False))
-        except:
-            pass
+            print(f"[디스플레이] 전체화면 활성화: {self.screen_width}x{self.screen_height}")
+        except Exception as e:
+            # Fallback to windowed mode
+            self.root.geometry(f"{self.screen_width}x{self.screen_height}")
+            print(f"[디스플레이] 창 모드: {self.screen_width}x{self.screen_height}")
 
         # Variables
         self.running = True
         self.mqtt_client = None
+        self.system_info = SystemInfo(device_name="Jetson1", location="Kitchen")  # System info for MQTT
         self.yolo_model = None
         self.auto_cap = None
         self.stirfry_cap = None
@@ -118,6 +137,8 @@ class IntegratedMonitorApp:
         self.stirfry_frame_count = 0
         self.developer_mode = False  # Developer mode toggle
         self.snapshot_count = 0  # Total snapshots taken
+        self.shutdown_tap_count = 0  # For 5-tap shutdown safety
+        self.last_tap_time = 0  # Track tap timing
         self.last_snapshot_path = None  # Last snapshot file path
         self.last_snapshot_time = None  # Last snapshot timestamp
 
@@ -131,6 +152,16 @@ class IntegratedMonitorApp:
         self.last_snapshot_tick = None
         self.frame_idx = 0
         self.yolo_frame_skip = 0  # Frame skip counter for performance
+
+        # Camera display control (Option 3: hide display, keep capturing)
+        self.auto_preview_visible = True  # Show/hide auto camera preview
+        self.stirfry_preview_visible = True  # Show/hide stir-fry camera preview
+        self.last_person_detected_time = None  # Last time person was detected
+        self.preview_hide_delay = 30  # Seconds of no activity before hiding preview
+
+        # Detection state for MQTT
+        self.person_detected = False  # Current person detection status
+        self.motion_detected = False  # Current motion detection status
 
         # Background subtractor
         self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
@@ -156,103 +187,187 @@ class IntegratedMonitorApp:
 
         print("[초기화] GUI 초기화 완료")
 
+    def detect_screen_size(self):
+        """Auto-detect screen resolution and calculate adaptive sizes"""
+        # Get actual screen dimensions
+        self.screen_width = self.root.winfo_screenwidth()
+        self.screen_height = self.root.winfo_screenheight()
+
+        print(f"[디스플레이] 감지된 화면 크기: {self.screen_width}x{self.screen_height}")
+
+        # Detect orientation
+        if self.screen_height > self.screen_width:
+            self.is_vertical = True
+            print("[디스플레이] 세로 방향 (Portrait) 감지")
+        else:
+            self.is_vertical = False
+            print("[디스플레이] 가로 방향 (Landscape) 감지")
+
+        # Calculate adaptive sizes based on screen height
+        # Base: 1280px height → scale proportionally
+        base_height = 1280
+        scale_factor = self.screen_height / base_height
+
+        # Ensure minimum scale for small screens
+        if scale_factor < 0.7:
+            scale_factor = 0.7
+            print("[디스플레이] 최소 스케일 적용 (0.7)")
+
+        # Store scale factor for layout calculations
+        self.scale_factor = scale_factor
+
+        # Calculate font sizes with scaling
+        self.large_font_size = max(20, int(32 * scale_factor))
+        self.medium_font_size = max(16, int(24 * scale_factor))
+        self.normal_font_size = max(12, int(18 * scale_factor))
+        self.status_font_size = max(14, int(20 * scale_factor))
+        self.button_font_size = max(16, int(22 * scale_factor))
+
+        # Apply dynamic fonts
+        global LARGE_FONT, MEDIUM_FONT, NORMAL_FONT, STATUS_FONT, BUTTON_FONT
+        LARGE_FONT = ("NanumGothic", self.large_font_size, "bold")
+        MEDIUM_FONT = ("NanumGothic", self.medium_font_size)
+        NORMAL_FONT = ("NanumGothic", self.normal_font_size)
+        STATUS_FONT = ("NanumGothic", self.status_font_size, "bold")
+        BUTTON_FONT = ("NanumGothic", self.button_font_size, "bold")
+
+        print(f"[디스플레이] 폰트 크기 자동 조정: "
+              f"대형={self.large_font_size}pt, "
+              f"중간={self.medium_font_size}pt, "
+              f"버튼={self.button_font_size}pt")
+
     def create_gui(self):
-        """Create the main GUI layout"""
-        # Top header
-        header_frame = tk.Frame(self.root, bg=COLOR_BG, height=80)
-        header_frame.pack(fill=tk.X, padx=10, pady=10)
+        """Create the main GUI layout - AUTO-ADAPTIVE for any screen"""
+        # Calculate adaptive dimensions
+        header_height = int(140 * self.scale_factor)  # Taller for more info
+        padding = int(10 * self.scale_factor)
+
+        # Top header - Adaptive height with more info
+        header_frame = tk.Frame(self.root, bg=COLOR_PANEL, height=header_height, bd=1, relief=tk.FLAT)
+        header_frame.pack(fill=tk.X, padx=0, pady=0)
         header_frame.pack_propagate(False)
 
-        tk.Label(header_frame, text="[ ROBOTCAM 통합 시스템 ]",
-                font=("NanumGothic", 32, "bold"), bg=COLOR_BG, fg=COLOR_TEXT).pack(side=tk.LEFT, padx=20)
+        # Header layout: 3 columns
+        header_frame.columnconfigure(0, weight=1)  # Left: System status
+        header_frame.columnconfigure(1, weight=1)  # Center: Title + Time
+        header_frame.columnconfigure(2, weight=1)  # Right: Vibration button
 
-        # Clock/Date display
-        clock_frame = tk.Frame(header_frame, bg=COLOR_BG)
-        clock_frame.pack(side=tk.RIGHT, padx=20)
+        # LEFT: System status + Date (compact)
+        left_frame = tk.Frame(header_frame, bg=COLOR_PANEL)
+        left_frame.grid(row=0, column=0, sticky="w", padx=8, pady=8)
 
-        self.time_label = tk.Label(clock_frame, text="--:--:--",
-                                   font=("NanumGothic", 28, "bold"), bg=COLOR_BG, fg=COLOR_INFO)
+        self.system_status_label = tk.Label(left_frame, text="시스템 정상",
+                                           font=NORMAL_FONT, bg=COLOR_PANEL, fg=COLOR_OK)
+        self.system_status_label.pack(anchor="w")
+
+        self.date_label = tk.Label(left_frame, text="----/--/--",
+                                   font=("NanumGothic", int(self.normal_font_size * 0.9)),
+                                   bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT)
+        self.date_label.pack(anchor="w")
+
+        # CENTER: Title + Time (compact)
+        center_frame = tk.Frame(header_frame, bg=COLOR_PANEL)
+        center_frame.grid(row=0, column=1, sticky="n", pady=5)
+
+        tk.Label(center_frame, text="현대자동차 울산점",
+                font=("NanumGothic", int(self.large_font_size * 0.85), "bold"),
+                bg=COLOR_PANEL, fg=COLOR_ACCENT).pack()
+
+        self.time_label = tk.Label(center_frame, text="--:--:--",
+                                   font=("NanumGothic", int(22 * self.scale_factor), "bold"),
+                                   bg=COLOR_PANEL, fg=COLOR_INFO)
         self.time_label.pack()
 
-        self.date_label = tk.Label(clock_frame, text="----/--/--",
-                                   font=MEDIUM_FONT, bg=COLOR_BG, fg=COLOR_TEXT)
-        self.date_label.pack()
+        # RIGHT: Vibration check button + Settings button (compact)
+        right_frame = tk.Frame(header_frame, bg=COLOR_PANEL)
+        right_frame.grid(row=0, column=2, sticky="e", padx=8, pady=8)
 
-        # Main content area
+        # Vibration check button
+        tk.Button(right_frame, text="진동 체크",
+                 font=("NanumGothic", int(self.button_font_size * 0.85), "bold"),
+                 command=self.open_vibration_check, bg=COLOR_INFO, fg="white",
+                 relief=tk.FLAT, bd=0, activebackground=COLOR_BUTTON_HOVER,
+                 padx=12, pady=8).pack(side=tk.LEFT, padx=3)
+
+        # Settings button (moved from bottom)
+        self.settings_btn = tk.Button(right_frame, text="설정",
+                 font=("NanumGothic", int(self.button_font_size * 0.85), "bold"),
+                 command=self.handle_settings_tap, bg=COLOR_BUTTON, fg="white",
+                 relief=tk.FLAT, bd=0, activebackground=COLOR_BUTTON_HOVER,
+                 padx=12, pady=8)
+        self.settings_btn.pack(side=tk.LEFT, padx=3)
+
+        # Main content area - ADAPTIVE STACK
         self.content_frame = tk.Frame(self.root, bg=COLOR_BG)
-        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=padding, pady=int(padding/2))
 
-        # Configure grid weights for equal distribution (2 or 3 panels)
+        # Configure rows for vertical stacking
+        self.content_frame.rowconfigure(0, weight=1)  # Auto panel
+        self.content_frame.rowconfigure(1, weight=1)  # Stir-fry panel
+        self.content_frame.rowconfigure(2, weight=1)  # Dev panel
         self.content_frame.columnconfigure(0, weight=1)
-        self.content_frame.columnconfigure(1, weight=1)
-        self.content_frame.columnconfigure(2, weight=1)
-        self.content_frame.rowconfigure(0, weight=1)
 
-        # Panel 1: Auto-start/down (LEFT)
+        # Panel 1: Auto-start/down (TOP)
         self.create_auto_panel(self.content_frame)
 
         # Panel 2: Stir-fry monitoring (MIDDLE)
         self.create_stirfry_panel(self.content_frame)
 
-        # Panel 3: Developer mode (RIGHT - hidden by default)
+        # Panel 3: Developer mode (BOTTOM - hidden by default)
         self.dev_panel = None
         self.create_dev_panel(self.content_frame)
 
-        # Bottom status bar
-        status_frame = tk.Frame(self.root, bg=COLOR_PANEL, height=60)
-        status_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=10)
-        status_frame.pack_propagate(False)
-
-        self.dev_mode_btn = tk.Button(status_frame, text="[ 개발자 모드 ]", font=MEDIUM_FONT,
-                 command=self.toggle_developer_mode, width=12, bg="#424242", fg=COLOR_TEXT)
-        self.dev_mode_btn.pack(side=tk.LEFT, padx=20, pady=10)
-
-        tk.Button(status_frame, text="[ 진동 체크 ]", font=MEDIUM_FONT,
-                 command=self.open_vibration_check, width=12, bg=COLOR_INFO, fg=COLOR_TEXT).pack(side=tk.LEFT, padx=5, pady=10)
-
-        tk.Button(status_frame, text="[ 설정 ]", font=MEDIUM_FONT,
-                 command=self.open_settings, width=10).pack(side=tk.LEFT, padx=5, pady=10)
-
-        tk.Button(status_frame, text="[ 종료 ]", font=MEDIUM_FONT,
-                 command=self.on_closing, width=10, bg=COLOR_ERROR, fg=COLOR_TEXT).pack(side=tk.LEFT, padx=5, pady=10)
-
-        self.system_status_label = tk.Label(status_frame, text="[ 시스템 정상 ]",
-                                           font=STATUS_FONT, bg=COLOR_PANEL, fg=COLOR_OK)
-        self.system_status_label.pack(side=tk.RIGHT, padx=20)
+        # Hidden shutdown button (shown after 5 taps on Settings button in header)
+        # Note: Settings button is now in the header (top right)
+        self.shutdown_btn = tk.Button(self.root, text="종료", font=BUTTON_FONT,
+                 command=self.confirm_shutdown, bg=COLOR_ERROR, fg="white",
+                 relief=tk.FLAT, bd=0, activebackground="#C62828")
+        # Don't pack it - keep it hidden until 5 taps on Settings
 
     def create_auto_panel(self, parent):
-        """Panel 1: Auto-start/down system"""
-        panel = tk.LabelFrame(parent, text="[ 자동 ON/OFF ]", font=LARGE_FONT,
-                             bg=COLOR_PANEL, fg=COLOR_TEXT, bd=3, relief=tk.RAISED)
-        panel.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        """Panel 1: Auto-start/down system - TOP with HORIZONTAL status"""
+        pad = int(10 * self.scale_factor)
+        panel = tk.LabelFrame(parent, text="자동 ON/OFF", font=LARGE_FONT,
+                             bg=COLOR_PANEL, fg=COLOR_ACCENT, bd=2, relief=tk.FLAT,
+                             highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
+        panel.grid(row=0, column=0, padx=pad, pady=int(pad/2), sticky="nsew")
 
-        # Status indicators (large text)
-        self.auto_mode_label = tk.Label(panel, text="모드: 주간", font=MEDIUM_FONT,
-                                       bg=COLOR_PANEL, fg=COLOR_INFO)
-        self.auto_mode_label.pack(pady=10)
+        # Status indicators in HORIZONTAL layout (space efficient)
+        status_container = tk.Frame(panel, bg=COLOR_PANEL)
+        status_container.pack(pady=10, padx=10, fill=tk.X)
 
-        self.auto_detection_label = tk.Label(panel, text="감지: 대기 중", font=MEDIUM_FONT,
-                                            bg=COLOR_PANEL, fg=COLOR_TEXT)
-        self.auto_detection_label.pack(pady=5)
+        # Grid layout: 2 rows x 2 columns
+        status_container.columnconfigure(0, weight=1)
+        status_container.columnconfigure(1, weight=1)
 
-        self.auto_status_label = tk.Label(panel, text="상태: 정상", font=MEDIUM_FONT,
-                                         bg=COLOR_PANEL, fg=COLOR_OK)
-        self.auto_status_label.pack(pady=5)
+        self.auto_mode_label = tk.Label(status_container, text="모드: 주간", font=MEDIUM_FONT,
+                                       bg=COLOR_PANEL, fg=COLOR_INFO, anchor="w")
+        self.auto_mode_label.grid(row=0, column=0, sticky="w", padx=5, pady=2)
 
-        self.auto_mqtt_label = tk.Label(panel, text="MQTT: 연결 대기", font=MEDIUM_FONT,
-                                       bg=COLOR_PANEL, fg=COLOR_WARNING)
-        self.auto_mqtt_label.pack(pady=5)
+        self.auto_detection_label = tk.Label(status_container, text="감지: 대기 중", font=MEDIUM_FONT,
+                                            bg=COLOR_PANEL, fg=COLOR_TEXT, anchor="w")
+        self.auto_detection_label.grid(row=0, column=1, sticky="w", padx=5, pady=2)
 
-        # Small preview area
+        self.auto_status_label = tk.Label(status_container, text="상태: 정상", font=MEDIUM_FONT,
+                                         bg=COLOR_PANEL, fg=COLOR_OK, anchor="w")
+        self.auto_status_label.grid(row=1, column=0, sticky="w", padx=5, pady=2)
+
+        self.auto_mqtt_label = tk.Label(status_container, text="MQTT: 연결 대기", font=MEDIUM_FONT,
+                                       bg=COLOR_PANEL, fg=COLOR_WARNING, anchor="w")
+        self.auto_mqtt_label.grid(row=1, column=1, sticky="w", padx=5, pady=2)
+
+        # Camera preview area (more space now)
         self.auto_preview_label = tk.Label(panel, text="[카메라 로딩 중...]",
                                           bg="black", fg="white", font=NORMAL_FONT)
-        self.auto_preview_label.pack(pady=20, padx=20, fill=tk.BOTH, expand=True)
+        self.auto_preview_label.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
 
     def create_stirfry_panel(self, parent):
-        """Panel 2: Stir-fry monitoring"""
-        panel = tk.LabelFrame(parent, text="[ 볶음 모니터링 ]", font=LARGE_FONT,
-                             bg=COLOR_PANEL, fg=COLOR_TEXT, bd=3, relief=tk.RAISED)
-        panel.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+        """Panel 2: Stir-fry monitoring - MIDDLE"""
+        pad = int(10 * self.scale_factor)
+        panel = tk.LabelFrame(parent, text="볶음 모니터링", font=LARGE_FONT,
+                             bg=COLOR_PANEL, fg=COLOR_ACCENT, bd=2, relief=tk.FLAT,
+                             highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
+        panel.grid(row=1, column=0, padx=pad, pady=int(pad/2), sticky="nsew")
 
         # Camera preview area (larger)
         self.stirfry_preview_label = tk.Label(panel, text="[카메라 로딩 중...]",
@@ -271,31 +386,53 @@ class IntegratedMonitorApp:
                                            font=MEDIUM_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
         self.stirfry_count_label.pack(pady=5)
 
-        # Control buttons
+        # Control buttons - Large touchscreen-friendly
         btn_frame = tk.Frame(panel, bg=COLOR_PANEL)
-        btn_frame.pack(pady=10)
+        btn_frame.pack(pady=15, fill=tk.X, padx=20)
 
-        self.stirfry_start_btn = tk.Button(btn_frame, text="[ 시작 ]", font=MEDIUM_FONT,
-                                          command=self.start_stirfry_recording, width=12,
-                                          bg=COLOR_OK, fg=COLOR_TEXT)
-        self.stirfry_start_btn.pack(side=tk.LEFT, padx=5)
+        self.stirfry_start_btn = tk.Button(btn_frame, text="시작", font=BUTTON_FONT,
+                                          command=self.start_stirfry_recording,
+                                          bg=COLOR_OK, fg="white", relief=tk.FLAT, bd=0,
+                                          activebackground="#00B248", height=2)
+        self.stirfry_start_btn.pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
 
-        self.stirfry_stop_btn = tk.Button(btn_frame, text="[ 중지 ]", font=MEDIUM_FONT,
-                                         command=self.stop_stirfry_recording, width=12,
-                                         bg=COLOR_ERROR, fg=COLOR_TEXT, state=tk.DISABLED)
-        self.stirfry_stop_btn.pack(side=tk.LEFT, padx=5)
+        self.stirfry_stop_btn = tk.Button(btn_frame, text="중지", font=BUTTON_FONT,
+                                         command=self.stop_stirfry_recording,
+                                         bg=COLOR_ERROR, fg="white", state=tk.DISABLED,
+                                         relief=tk.FLAT, bd=0, activebackground="#C62828", height=2)
+        self.stirfry_stop_btn.pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
 
     def create_dev_panel(self, parent):
-        """Panel 3: Developer mode (debugging panel)"""
-        panel = tk.LabelFrame(parent, text="[ 개발자 모드 ]", font=LARGE_FONT,
-                             bg=COLOR_PANEL, fg=COLOR_WARNING, bd=3, relief=tk.RAISED)
+        """Panel 3: Developer mode (debugging panel) - BOTTOM with scrolling"""
+        pad = int(10 * self.scale_factor)
+        panel = tk.LabelFrame(parent, text="개발자 모드", font=LARGE_FONT,
+                             bg=COLOR_PANEL, fg=COLOR_WARNING, bd=2, relief=tk.FLAT,
+                             highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
 
+        # Create canvas and scrollbar for scrollable content
+        canvas = tk.Canvas(panel, bg=COLOR_PANEL, highlightthickness=0)
+        scrollbar = tk.Scrollbar(panel, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg=COLOR_PANEL)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Add all content to scrollable_frame instead of panel
         # Title
-        tk.Label(panel, text="야간 모션 스냅샷 디버그", font=MEDIUM_FONT,
+        tk.Label(scrollable_frame, text="야간 모션 스냅샷 디버그", font=MEDIUM_FONT,
                 bg=COLOR_PANEL, fg=COLOR_TEXT).pack(pady=10)
 
         # Snapshot stats
-        stats_frame = tk.Frame(panel, bg=COLOR_PANEL)
+        stats_frame = tk.Frame(scrollable_frame, bg=COLOR_PANEL)
         stats_frame.pack(pady=10, fill=tk.X, padx=20)
 
         self.dev_snapshot_count_label = tk.Label(stats_frame, text="스냅샷: 0장",
@@ -306,38 +443,56 @@ class IntegratedMonitorApp:
                                                 font=NORMAL_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
         self.dev_last_snapshot_label.pack(pady=5)
 
-        # Last snapshot preview
-        self.dev_snapshot_preview = tk.Label(panel, text="[스냅샷 미리보기]",
-                                            bg="black", fg="white", font=NORMAL_FONT,
-                                            width=50, height=15)
-        self.dev_snapshot_preview.pack(pady=10, padx=10)
+        # Last snapshot preview - smaller to fit better
+        self.dev_snapshot_preview = tk.Label(scrollable_frame, text="[스냅샷 미리보기]",
+                                            bg="black", fg="white", font=NORMAL_FONT)
+        self.dev_snapshot_preview.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
 
         # Motion detection info
-        self.dev_motion_label = tk.Label(panel, text="모션 감지: 대기 중",
+        self.dev_motion_label = tk.Label(scrollable_frame, text="모션 감지: 대기 중",
                                         font=NORMAL_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
         self.dev_motion_label.pack(pady=5)
 
         # Test button - skip to snapshot mode
-        tk.Button(panel, text="[ 스냅샷 모드 즉시 시작 ]", font=NORMAL_FONT,
-                 command=self.force_snapshot_mode, bg=COLOR_ERROR, fg=COLOR_TEXT,
-                 width=20).pack(pady=10)
+        tk.Button(scrollable_frame, text="스냅샷 모드 즉시 시작", font=BUTTON_FONT,
+                 command=self.force_snapshot_mode, bg=COLOR_ERROR, fg="white",
+                 relief=tk.FLAT, bd=0, activebackground="#C62828").pack(pady=15, padx=20, fill=tk.X)
+
+        # Enable mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)  # Windows/MacOS
+        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))  # Linux scroll up
+        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))   # Linux scroll down
 
         # Store panel reference but don't grid it yet
         self.dev_panel = panel
 
     def toggle_developer_mode(self):
-        """Toggle developer mode panel"""
+        """Toggle developer mode panel - Click same button to exit"""
         self.developer_mode = not self.developer_mode
 
+        pad = int(10 * self.scale_factor)
         if self.developer_mode:
             # Show developer panel
-            self.dev_panel.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
-            self.dev_mode_btn.config(bg=COLOR_WARNING, text="[ 개발자 모드 ON ]")
-            print("[개발자] 개발자 모드 활성화")
+            self.dev_panel.grid(row=2, column=0, padx=pad, pady=int(pad/2), sticky="nsew")
+            self.dev_mode_btn.config(
+                bg=COLOR_WARNING,
+                text="개발자 종료",
+                fg="white",
+                activebackground="#E65100"  # Darker orange on hover
+            )
+            print("[개발자] 개발자 모드 활성화 (다시 클릭하여 종료)")
         else:
             # Hide developer panel
             self.dev_panel.grid_forget()
-            self.dev_mode_btn.config(bg="#424242", text="[ 개발자 모드 ]")
+            self.dev_mode_btn.config(
+                bg="#607D8B",
+                text="개발자 모드",
+                fg="white",
+                activebackground="#546E7A"  # Darker gray on hover
+            )
             print("[개발자] 개발자 모드 비활성화")
 
     def force_snapshot_mode(self):
@@ -353,33 +508,31 @@ class IntegratedMonitorApp:
     # Initialization
     # =========================
     def init_mqtt(self):
-        """Initialize MQTT connection"""
+        """Initialize MQTT connection with new centralized client"""
         if not MQTT_ENABLED:
             print("[MQTT] 설정에서 비활성화됨")
             self.auto_mqtt_label.config(text="MQTT: 비활성화", fg=COLOR_TEXT)
             return
 
         try:
-            def on_connect(client, userdata, flags, rc):
-                if rc == 0:
-                    print("[MQTT] 연결 성공")
-                    self.auto_mqtt_label.config(text="MQTT: 연결됨", fg=COLOR_OK)
-                else:
-                    print(f"[MQTT] 연결 실패 (코드 {rc})")
-                    self.auto_mqtt_label.config(text=f"MQTT: 오류({rc})", fg=COLOR_ERROR)
-
-            def on_disconnect(client, userdata, rc):
-                if rc != 0:
-                    print(f"[MQTT] 예기치 않은 연결 끊김 (코드 {rc})")
-                    self.auto_mqtt_label.config(text="MQTT: 연결 끊김", fg=COLOR_ERROR)
-
-            self.mqtt_client = mqtt.Client(client_id=MQTT_CLIENT_ID)
-            self.mqtt_client.on_connect = on_connect
-            self.mqtt_client.on_disconnect = on_disconnect
-
             print(f"[MQTT] {MQTT_BROKER}:{MQTT_PORT}에 연결 중...")
-            self.mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
-            self.mqtt_client.loop_start()
+
+            # Create MQTT client with system info
+            self.mqtt_client = MQTTClient(
+                broker=MQTT_BROKER,
+                port=MQTT_PORT,
+                client_id=MQTT_CLIENT_ID,
+                topic_prefix="frying_ai/jetson1",
+                system_info=self.system_info.to_dict()
+            )
+
+            # Connect to broker
+            if self.mqtt_client.connect(blocking=True, timeout=5.0):
+                print("[MQTT] 연결 성공")
+                self.auto_mqtt_label.config(text="MQTT: 연결됨", fg=COLOR_OK)
+            else:
+                print("[MQTT] 연결 실패")
+                self.auto_mqtt_label.config(text="MQTT: 오류", fg=COLOR_ERROR)
 
         except Exception as e:
             print(f"[MQTT] 초기화 실패: {e}")
@@ -524,6 +677,10 @@ class IntegratedMonitorApp:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
         if detected:
+            # Update detection state and time (for auto-hide feature)
+            self.person_detected = True
+            self.last_person_detected_time = now
+
             if self.det_hold_start is None:
                 self.det_hold_start = now
                 self.auto_detection_label.config(text=f"감지: 사람 {person_count}명", fg=COLOR_WARNING)
@@ -540,6 +697,8 @@ class IntegratedMonitorApp:
                     self.on_triggered = True
                     self.auto_detection_label.config(text="감지: ON 전송 완료", fg=COLOR_OK)
         else:
+            # No person detected
+            self.person_detected = False
             self.det_hold_start = None
             if not self.on_triggered:
                 self.auto_detection_label.config(text="감지: 대기 중", fg=COLOR_TEXT)
@@ -565,9 +724,16 @@ class IntegratedMonitorApp:
                 detected = any(r.names.get(int(c), "") == "person" for c in r.boxes.cls)
 
             if detected:
+                # Update detection state and time (for auto-hide feature)
+                self.person_detected = True
+                self.last_person_detected_time = now
+
                 # Reset deadline
                 self.night_no_person_deadline = now + timedelta(minutes=NIGHT_CHECK_MINUTES)
                 self.auto_detection_label.config(text="감지: 사람 있음 (리셋)", fg=COLOR_WARNING)
+            else:
+                # No person detected
+                self.person_detected = False
 
             # Check deadline
             if self.night_no_person_deadline is not None and now >= self.night_no_person_deadline:
@@ -617,6 +783,9 @@ class IntegratedMonitorApp:
                         self.dev_motion_label.config(text="모션 감지: 없음", fg=COLOR_TEXT)
 
                 if motion:
+                    # Update motion detection state
+                    self.motion_detected = True
+
                     now_tick = time.monotonic()
                     can_save = (self.last_snapshot_tick is None) or ((now_tick - self.last_snapshot_tick) >= SAVE_COOLDOWN_SEC)
                     if can_save:
@@ -624,6 +793,8 @@ class IntegratedMonitorApp:
                         self.last_snapshot_tick = now_tick
                         self.auto_detection_label.config(text="감지: 모션 저장됨", fg=COLOR_OK)
                 else:
+                    # No motion detected
+                    self.motion_detected = False
                     self.auto_detection_label.config(text="감지: 모션 대기", fg=COLOR_TEXT)
 
     def update_stirfry_camera(self):
@@ -650,10 +821,49 @@ class IntegratedMonitorApp:
         self.root.after(20, self.update_stirfry_camera)  # ~50 FPS for smoother display
 
     def update_auto_preview(self, frame):
-        """Update auto system preview"""
+        """Update auto system preview with auto-zoom and auto-hide"""
         try:
-            # Resize for preview (larger - more space now)
-            preview = cv2.resize(frame, (560, 420))
+            # Option 3: Check if preview should be shown
+            should_show = self.should_show_preview("auto")
+
+            if not should_show:
+                # Hide preview - show message instead
+                if self.auto_preview_visible:
+                    self.auto_preview_label.configure(image="", text="[대기 중 - 화면 절전]")
+                    self.auto_preview_visible = False
+                    print("[화면절전] 자동 카메라 화면 숨김 (캡처는 계속됨)")
+                return
+            else:
+                # Show preview
+                if not self.auto_preview_visible:
+                    self.auto_preview_visible = True
+                    print("[화면복구] 자동 카메라 화면 복구")
+
+            # Option 4: Aspect-fit resize - fill as much space as possible while maintaining aspect ratio
+            # Get actual label size (black area dimensions)
+            label_width = self.auto_preview_label.winfo_width()
+            label_height = self.auto_preview_label.winfo_height()
+
+            # Use minimum size on first render before widget is sized
+            if label_width <= 1 or label_height <= 1:
+                label_width, label_height = 640, 480
+
+            # Calculate aspect-fit dimensions (maintain 16:9 camera aspect ratio)
+            frame_h, frame_w = frame.shape[:2]
+            frame_aspect = frame_w / frame_h  # Camera aspect ratio (640/360 = 1.778)
+            label_aspect = label_width / label_height  # Available space aspect ratio
+
+            if label_aspect > frame_aspect:
+                # Label is wider than camera aspect → fit to height, add black bars left/right
+                new_height = label_height
+                new_width = int(new_height * frame_aspect)
+            else:
+                # Label is taller than camera aspect → fit to width, add black bars top/bottom
+                new_width = label_width
+                new_height = int(new_width / frame_aspect)
+
+            # Resize frame to calculated dimensions (maintains aspect ratio)
+            preview = cv2.resize(frame, (new_width, new_height))
             preview_rgb = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(preview_rgb)
             imgtk = ImageTk.PhotoImage(image=img)
@@ -663,10 +873,49 @@ class IntegratedMonitorApp:
             pass
 
     def update_stirfry_preview(self, frame):
-        """Update stir-fry camera preview"""
+        """Update stir-fry camera preview with auto-zoom and auto-hide"""
         try:
-            # Resize for preview (larger - more space now)
-            preview = cv2.resize(frame, (560, 420))
+            # Option 3: Check if preview should be shown (only when recording)
+            should_show = self.should_show_preview("stirfry")
+
+            if not should_show:
+                # Hide preview - show message instead
+                if self.stirfry_preview_visible:
+                    self.stirfry_preview_label.configure(image="", text="[녹화 대기 중 - 화면 절전]")
+                    self.stirfry_preview_visible = False
+                    print("[화면절전] 볶음 카메라 화면 숨김 (캡처는 계속됨)")
+                return
+            else:
+                # Show preview
+                if not self.stirfry_preview_visible:
+                    self.stirfry_preview_visible = True
+                    print("[화면복구] 볶음 카메라 화면 복구")
+
+            # Option 4: Aspect-fit resize - fill as much space as possible while maintaining aspect ratio
+            # Get actual label size (black area dimensions)
+            label_width = self.stirfry_preview_label.winfo_width()
+            label_height = self.stirfry_preview_label.winfo_height()
+
+            # Use minimum size on first render before widget is sized
+            if label_width <= 1 or label_height <= 1:
+                label_width, label_height = 640, 480
+
+            # Calculate aspect-fit dimensions (maintain 16:9 camera aspect ratio)
+            frame_h, frame_w = frame.shape[:2]
+            frame_aspect = frame_w / frame_h  # Camera aspect ratio (640/360 = 1.778)
+            label_aspect = label_width / label_height  # Available space aspect ratio
+
+            if label_aspect > frame_aspect:
+                # Label is wider than camera aspect → fit to height, add black bars left/right
+                new_height = label_height
+                new_width = int(new_height * frame_aspect)
+            else:
+                # Label is taller than camera aspect → fit to width, add black bars top/bottom
+                new_width = label_width
+                new_height = int(new_width / frame_aspect)
+
+            # Resize frame to calculated dimensions (maintains aspect ratio)
+            preview = cv2.resize(frame, (new_width, new_height))
             preview_rgb = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(preview_rgb)
             imgtk = ImageTk.PhotoImage(image=img)
@@ -678,6 +927,30 @@ class IntegratedMonitorApp:
     # =========================
     # Helper Functions
     # =========================
+
+    def should_show_preview(self, camera_type="auto"):
+        """
+        Option 3: Determine if camera preview should be shown
+        Returns True if preview should be visible, False to hide
+        """
+        if camera_type == "auto":
+            # Auto camera: hide after 30s of no person detection
+            if self.last_person_detected_time is None:
+                # First time, initialize to now to prevent immediate hiding
+                from datetime import datetime
+                self.last_person_detected_time = datetime.now()
+                return True  # First time, always show
+
+            from datetime import datetime
+            elapsed = (datetime.now() - self.last_person_detected_time).total_seconds()
+            return elapsed < self.preview_hide_delay
+
+        elif camera_type == "stirfry":
+            # Stir-fry camera: only show when recording
+            return self.stirfry_recording
+
+        return True
+
     def is_daytime_mode(self, now):
         """Check if current time is daytime"""
         if FORCE_MODE == "day":
@@ -690,14 +963,30 @@ class IntegratedMonitorApp:
         return today_start <= now <= today_end
 
     def publish_mqtt(self, message):
-        """Publish message to MQTT broker"""
-        if self.mqtt_client is not None:
+        """Publish message to MQTT broker with enhanced data"""
+        if self.mqtt_client is not None and self.mqtt_client.is_connected():
             try:
-                result = self.mqtt_client.publish(MQTT_TOPIC, message, qos=MQTT_QOS)
-                if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                # Enhanced payload with system metrics
+                payload = {
+                    "command": message,  # "ON" or "OFF"
+                    "source": "auto_start_system",
+                    "person_detected": self.person_detected,
+                    "motion_detected": self.motion_detected,
+                    "system_metrics": self.system_info.get_dynamic_info()
+                }
+
+                # Publish to robot/control topic
+                success = self.mqtt_client.publish(
+                    topic_suffix="robot/control",
+                    payload=payload,
+                    qos=MQTT_QOS
+                )
+
+                if success:
                     print(f"[MQTT] 메시지 전송 완료: {message}")
                 else:
-                    print(f"[MQTT] 전송 실패 (코드 {result.rc})")
+                    print(f"[MQTT] 전송 실패")
+
             except Exception as e:
                 print(f"[MQTT] 전송 오류: {e}")
 
@@ -820,9 +1109,48 @@ class IntegratedMonitorApp:
 
         print("[진동] 진동 센서 체크 창 열림")
 
+    def handle_settings_tap(self):
+        """Handle settings button tap - 5 taps reveals shutdown"""
+        import time
+        current_time = time.time()
+
+        # Reset counter if more than 2 seconds since last tap
+        if current_time - self.last_tap_time > 2.0:
+            self.shutdown_tap_count = 0
+
+        self.last_tap_time = current_time
+        self.shutdown_tap_count += 1
+
+        print(f"[설정] 탭 횟수: {self.shutdown_tap_count}/5")
+
+        if self.shutdown_tap_count >= 5:
+            # Show shutdown button after 5 quick taps (replace settings button temporarily)
+            print("[설정] 종료 버튼 활성화")
+            self.settings_btn.pack_forget()  # Hide settings button
+            self.shutdown_btn.pack(side=tk.LEFT, padx=3)  # Show in same location
+            self.shutdown_tap_count = 0  # Reset
+        elif self.shutdown_tap_count == 1:
+            # Schedule settings dialog to open after a short delay
+            # This allows subsequent taps to register first
+            self.root.after(500, self.open_settings_delayed)
+
+    def open_settings_delayed(self):
+        """Open settings dialog after delay - only if still at 1 tap"""
+        if self.shutdown_tap_count <= 1:
+            messagebox.showinfo("설정", "설정 기능은 준비 중입니다.\nconfig.json 파일을 직접 수정하세요.")
+
     def open_settings(self):
-        """Open settings dialog (placeholder)"""
+        """Open settings dialog immediately (for direct calls)"""
         messagebox.showinfo("설정", "설정 기능은 준비 중입니다.\nconfig.json 파일을 직접 수정하세요.")
+
+    def confirm_shutdown(self):
+        """Confirm shutdown and close"""
+        if messagebox.askokcancel("종료 확인", "정말 시스템을 종료하시겠습니까?"):
+            self.on_closing()
+        else:
+            # Cancel - hide shutdown button, show settings again
+            self.shutdown_btn.pack_forget()
+            self.settings_btn.pack(side=tk.LEFT, padx=3)
 
     def on_closing(self):
         """Handle window close"""
@@ -836,7 +1164,6 @@ class IntegratedMonitorApp:
             if self.stirfry_cap is not None:
                 self.stirfry_cap.release()
             if self.mqtt_client is not None:
-                self.mqtt_client.loop_stop()
                 self.mqtt_client.disconnect()
 
             self.root.destroy()

@@ -1,28 +1,22 @@
 #!/bin/bash
-# Setup X11 for Docker GUI support
-# Run this ONCE on the HOST (outside Docker)
+# Setup X11 for Docker GUI applications
 
-echo "Setting up X11 for Docker containers..."
-echo "========================================"
+echo "Setting up X11 forwarding for Docker..."
 
-# Allow Docker to connect to X server
-echo "1. Allowing Docker X11 access..."
+# Create .docker.xauth file if it doesn't exist
+XAUTH=/tmp/.docker.xauth
+if [ ! -f $XAUTH ]; then
+    touch $XAUTH
+fi
+
+# Generate xauth key
+xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f $XAUTH nmerge -
+
+# Set proper permissions
+chmod 644 $XAUTH
+
+# Allow connections from local
 xhost +local:docker
 
-# Create X11 auth file
-echo "2. Creating X11 auth file..."
-touch /tmp/.docker.xauth
-xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f /tmp/.docker.xauth nmerge -
-chmod 644 /tmp/.docker.xauth
-
-echo ""
-echo "✅ X11 setup complete!"
-echo ""
-echo "Now restart your Docker container:"
-echo "  docker-compose down"
-echo "  docker-compose up -d"
-echo "  docker-compose exec ai-dev bash"
-echo ""
-echo "Then inside container, run:"
-echo "  cd /project/autostart_autodown"
-echo "  python3 ROBOTCAM_HEADLESS.py"
+echo "✓ X11 setup complete!"
+echo "Now you can run GUI applications in Docker"

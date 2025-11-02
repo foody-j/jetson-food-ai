@@ -13,7 +13,14 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
 
 # 2. 파이썬과 PyTorch 설치에 필요한 기본 시스템 라이브러리들을 설치합니다.
 RUN apt-get update && apt-get install -y python3-pip libopenblas-base libopenmpi-dev libjpeg-dev zlib1g-dev && rm -rf /var/lib/apt/lists/*
-RUN apt-get update && apt-get install -y libgtk2.0-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libgtk2.0-dev python3-tk && rm -rf /var/lib/apt/lists/*
+
+# 2-1. 한글 폰트 설치 (Korean fonts for GUI)
+RUN apt-get update && apt-get install -y \
+    fonts-nanum \
+    fonts-nanum-coding \
+    fonts-nanum-extra \
+    && rm -rf /var/lib/apt/lists/*
 
 # 3. 카메라 및 비디오 처리를 위한 라이브러리 설치
 RUN apt-get update && apt-get install -y \
@@ -38,9 +45,14 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-gtk3 \
     && rm -rf /var/lib/apt/lists/*
 
-# 4. Python 패키지 설치 (OpenCV 최신 버전)
+# 4. Python 패키지 설치 (OpenCV 최신 버전 + 필수 패키지)
 RUN pip3 install --upgrade pip && \
-    pip3 install opencv-python opencv-contrib-python numpy
+    pip3 install opencv-python opencv-contrib-python numpy Pillow \
+    ultralytics paho-mqtt psutil
+
+# 5. Ultralytics 설정 디렉토리 생성 및 권한 설정
+RUN mkdir -p /root/.config/Ultralytics && chmod -R 777 /root/.config/Ultralytics
+ENV YOLO_CONFIG_DIR=/root/.config/Ultralytics
 
 # 7. 컨테이너 안의 기본 작업 폴더를 /project로 설정합니다.
 WORKDIR /project

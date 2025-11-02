@@ -12,7 +12,12 @@ import time
 import os
 import json
 import argparse
-import paho.mqtt.client as mqtt
+import sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.communication.mqtt_client import MQTTClient
+from src.core.system_info import SystemInfo
 
 # =========================
 # Load Configuration
@@ -81,26 +86,28 @@ print(f"[CONFIG] MQTT={MQTT_ENABLED} | broker={MQTT_BROKER}:{MQTT_PORT} | topic=
 # =========================
 # MQTT Setup
 # =========================
+system_info = SystemInfo(device_name="Jetson1", location="Kitchen")
 mqtt_client = None
+
 if MQTT_ENABLED:
     try:
-        def on_connect(client, userdata, flags, rc):
-            if rc == 0:
-                print("[MQTT] Connected successfully")
-            else:
-                print(f"[MQTT] Connection failed with code {rc}")
-
-        def on_disconnect(client, userdata, rc):
-            if rc != 0:
-                print(f"[MQTT] Unexpected disconnection (code {rc})")
-
-        mqtt_client = mqtt.Client(client_id=MQTT_CLIENT_ID)
-        mqtt_client.on_connect = on_connect
-        mqtt_client.on_disconnect = on_disconnect
-
         print(f"[MQTT] Connecting to {MQTT_BROKER}:{MQTT_PORT}...")
-        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
-        mqtt_client.loop_start()  # Start background thread
+
+        # Create MQTT client with system info
+        mqtt_client = MQTTClient(
+            broker=MQTT_BROKER,
+            port=MQTT_PORT,
+            client_id=MQTT_CLIENT_ID,
+            topic_prefix="frying_ai/jetson1",
+            system_info=system_info.to_dict()
+        )
+
+        # Connect to broker
+        if mqtt_client.connect(blocking=True, timeout=5.0):
+            print("[MQTT] Connected successfully")
+        else:
+            print("[MQTT] Connection failed")
+            mqtt_client = None
 
     except Exception as e:
         print(f"[MQTT] Failed to initialize: {e}")
@@ -129,15 +136,31 @@ def mode_override(now: datetime, force_mode, start_t: dtime, end_t: dtime) -> bo
         return False
     return is_daytime(now, start_t, end_t)
 
-def publish_mqtt(message: str):
-    """Publish message to MQTT broker if enabled"""
-    if mqtt_client is not None:
+def publish_mqtt(message: str, person_detected=False, motion_detected=False):
+    """Publish message to MQTT broker with enhanced data"""
+    if mqtt_client is not None and mqtt_client.is_connected():
         try:
-            result = mqtt_client.publish(MQTT_TOPIC, message, qos=MQTT_QOS)
-            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+            # Enhanced payload with system metrics
+            payload = {
+                "command": message,  # "ON" or "OFF"
+                "source": "auto_start_system",
+                "person_detected": person_detected,
+                "motion_detected": motion_detected,
+                "system_metrics": system_info.get_dynamic_info()
+            }
+
+            # Publish to robot/control topic
+            success = mqtt_client.publish(
+                topic_suffix="robot/control",
+                payload=payload,
+                qos=MQTT_QOS
+            )
+
+            if success:
                 print(f"[MQTT] Published: {message}")
             else:
-                print(f"[MQTT] Publish failed with code {result.rc}")
+                print(f"[MQTT] Publish failed")
+
         except Exception as e:
             print(f"[MQTT] Publish error: {e}")
 
@@ -243,7 +266,7 @@ try:
                         print("=" * 50)
                         print("ON !!!")
                         print("=" * 50)
-                        publish_mqtt("ON")
+                        publish_mqtt("ON", person_detected=True, motion_detected=False)
                         on_triggered = True
             else:
                 det_hold_start = None
@@ -274,7 +297,7 @@ try:
                         print("=" * 50)
                         print("OFF !!!")
                         print("=" * 50)
-                        publish_mqtt("OFF")
+                        publish_mqtt("OFF", person_detected=False, motion_detected=False)
                         off_triggered_once = True
                     night_check_active = False
                     night_no_person_deadline = None
@@ -346,7 +369,6 @@ finally:
     if DISPLAY_WINDOW:
         cv2.destroyAllWindows()
     if mqtt_client is not None:
-        mqtt_client.loop_stop()
         mqtt_client.disconnect()
         print("[MQTT] Disconnected")
     print("[EXIT] Done.")

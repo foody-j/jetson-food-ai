@@ -38,8 +38,8 @@ services:
       - /dev/nvhost-gpu:/dev/nvhost-gpu  # GPU 디바이스
       - /dev/nvhost-as-gpu:/dev/nvhost-as-gpu  # GPU 주소 공간
       # 카메라 디바이스 (USB 카메라)
-      - /dev/video1:/dev/video1  # 메인 카메라
-      - /dev/video2:/dev/video2  # 카메라 메타데이터
+      # - /dev/video0:/dev/video0  # 카메라 1
+      # - /dev/video1:/dev/video1  # 카메라 2
     # 카메라 접근을 위한 추가 권한
     privileged: false
     # video 그룹 권한 추가

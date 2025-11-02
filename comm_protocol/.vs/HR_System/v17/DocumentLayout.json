@@ -1,0 +1,70 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\SKS\\Desktop\\WORK\\03 \uD604\uB300\uADF8\uB9B0\uD478\uB4DC\\02 SW\\HR_System\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{437A2C7A-F9C0-42F7-B690-6AE2ADEB1AC2}|HR_System\\HR_System.csproj|C:\\Users\\SKS\\Desktop\\WORK\\03 \uD604\uB300\uADF8\uB9B0\uD478\uB4DC\\02 SW\\HR_System\\hr_system\\mainformbroker.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
+      "RelativeMoniker": "D:0:0:{437A2C7A-F9C0-42F7-B690-6AE2ADEB1AC2}|HR_System\\HR_System.csproj|solutionrelative:hr_system\\mainformbroker.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{437A2C7A-F9C0-42F7-B690-6AE2ADEB1AC2}|HR_System\\HR_System.csproj|c:\\users\\sks\\desktop\\work\\03 \uD604\uB300\uADF8\uB9B0\uD478\uB4DC\\02 sw\\hr_system\\hr_system\\mainformbroker.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{437A2C7A-F9C0-42F7-B690-6AE2ADEB1AC2}|HR_System\\HR_System.csproj|solutionrelative:hr_system\\mainformbroker.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{437A2C7A-F9C0-42F7-B690-6AE2ADEB1AC2}|HR_System\\HR_System.csproj|C:\\Users\\SKS\\Desktop\\WORK\\03 \uD604\uB300\uADF8\uB9B0\uD478\uB4DC\\02 SW\\HR_System\\hr_system\\mainformbroker.designer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{437A2C7A-F9C0-42F7-B690-6AE2ADEB1AC2}|HR_System\\HR_System.csproj|solutionrelative:hr_system\\mainformbroker.designer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 2,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "MainFormBroker.Designer.cs",
+              "DocumentMoniker": "C:\\Users\\SKS\\Desktop\\WORK\\03 \uD604\uB300\uADF8\uB9B0\uD478\uB4DC\\02 SW\\HR_System\\HR_System\\MainFormBroker.Designer.cs",
+              "RelativeDocumentMoniker": "HR_System\\MainFormBroker.Designer.cs",
+              "ToolTip": "C:\\Users\\SKS\\Desktop\\WORK\\03 \uD604\uB300\uADF8\uB9B0\uD478\uB4DC\\02 SW\\HR_System\\HR_System\\MainFormBroker.Designer.cs",
+              "RelativeToolTip": "HR_System\\MainFormBroker.Designer.cs",
+              "ViewState": "AgIAAFoAAAAAAAAAAAAQwJAAAAAdAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-10-30T02:33:45.908Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "MainFormBroker.cs",
+              "DocumentMoniker": "C:\\Users\\SKS\\Desktop\\WORK\\03 \uD604\uB300\uADF8\uB9B0\uD478\uB4DC\\02 SW\\HR_System\\HR_System\\MainFormBroker.cs",
+              "RelativeDocumentMoniker": "HR_System\\MainFormBroker.cs",
+              "ToolTip": "C:\\Users\\SKS\\Desktop\\WORK\\03 \uD604\uB300\uADF8\uB9B0\uD478\uB4DC\\02 SW\\HR_System\\HR_System\\MainFormBroker.cs",
+              "RelativeToolTip": "HR_System\\MainFormBroker.cs",
+              "ViewState": "AgIAALoAAAAAAAAAAAAYwNoAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-10-30T02:23:36.756Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "MainFormBroker.cs [\uB514\uC790\uC778]",
+              "DocumentMoniker": "C:\\Users\\SKS\\Desktop\\WORK\\03 \uD604\uB300\uADF8\uB9B0\uD478\uB4DC\\02 SW\\HR_System\\HR_System\\MainFormBroker.cs",
+              "RelativeDocumentMoniker": "HR_System\\MainFormBroker.cs",
+              "ToolTip": "C:\\Users\\SKS\\Desktop\\WORK\\03 \uD604\uB300\uADF8\uB9B0\uD478\uB4DC\\02 SW\\HR_System\\HR_System\\MainFormBroker.cs [\uB514\uC790\uC778]",
+              "RelativeToolTip": "HR_System\\MainFormBroker.cs [\uB514\uC790\uC778]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-10-30T02:23:21.562Z",
+              "EditorCaption": " [\uB514\uC790\uC778]"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
