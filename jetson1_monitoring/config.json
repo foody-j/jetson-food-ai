@@ -17,7 +17,7 @@
   "detection_hold_sec": 30,
   "night_check_minutes": 0,
   "motion_min_area": 1500,
-  "snapshot_dir": "Detection",
+  "snapshot_dir": "~/Detection",
   "snapshot_cooldown_sec": 10,
   "display_window": false,
   "window_width": 1280,
@@ -36,7 +36,7 @@
   "stirfry_right_camera_index": 1,
   "stirfry_right_gmsl_mode": 2,
   "stirfry_right_gmsl_resolution_mode": 1,
-  "stirfry_save_dir": "StirFry_Data",
+  "stirfry_save_dir": "~/StirFry_Data",
   "stirfry_save_resolution": {
     "width": 960,
     "height": 768
