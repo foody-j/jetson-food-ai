@@ -1,0 +1,22 @@
+[Unit]
+Description=ROBOTCAM Jetson #1 Integrated Monitoring System
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=dkuyj
+Group=dkuyj
+WorkingDirectory=/home/dkuyj/jetson-camera-monitor/jetson1_monitoring
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/dkuyj/.Xauthority"
+Environment="PYTHONUNBUFFERED=1"
+ExecStartPre=/bin/sleep 10
+ExecStart=/usr/bin/python3 /home/dkuyj/jetson-camera-monitor/jetson1_monitoring/JETSON1_INTEGRATED.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

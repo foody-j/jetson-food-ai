@@ -1,0 +1,17 @@
+# ROBOTCAM Jetson Camera Monitor - Python Dependencies
+# JetPack 6.2 (L4T R36.4.3) 테스트 완료
+# 생성일: 2025-01-05
+
+# 핵심 의존성 (버전 고정)
+numpy==1.26.4
+opencv-python==4.12.0.88
+Pillow==9.0.1
+
+# AI/ML
+ultralytics==8.3.224
+
+# MQTT 통신
+paho-mqtt==2.1.0
+
+# 시스템 모니터링
+psutil==7.1.3

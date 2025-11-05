@@ -20,10 +20,15 @@ class Config:
                 "log_timezone": True
             },
             "camera": {
+                "type": "usb",  # "usb" or "gmsl"
                 "index": 0,
                 "resolution": {"width": 640, "height": 360},
                 "fps": 30,
-                "name": "Default Camera"
+                "name": "Default Camera",
+                # GMSL-specific settings
+                "gmsl_mode": 2,  # 0=GMSL, 1=GMSL2/6G, 2=GMSL2/3G
+                "gmsl_resolution_mode": 1,  # 0-4 (see GMSL docs)
+                "gmsl_driver_dir": "/home/dkuyj/jetson-camera-monitor/SG4A-NONX-G2Y-A1_ORIN_NANO_YUV_JP6.2_L4TR36.4.3"
             },
             "recording": {
                 "codec": "MJPG",

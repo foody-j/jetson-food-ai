@@ -1,306 +1,181 @@
-# 📹 Jetson Camera Monitor
+# 🤖 Jetson 카메라 모니터링 시스템
 
-> NVIDIA Jetson을 위한 실시간 카메라 모니터링 시스템
+NVIDIA Jetson Orin Nano 기반 실시간 GMSL 카메라 모니터링 및 AI 분석 시스템
 
----
-
-## ✨ 주요 기능
-
-- 🎥 실시간 카메라 스트리밍 및 프레임 처리
-- 📼 비디오 녹화 (자동 해상도 조정)
-- 🔍 움직임 감지 및 자동 스크린샷
-- ⚙️ JSON 기반 설정 관리
-- 🌍 Timezone 설정 지원 (배포 환경별 시간대 관리)
-- 🖥️ 헤드리스 모드 백그라운드 실행
-- 🐳 Docker 환경 최적화
+**버전**: 2.0  
+**대상**: Jetson Orin Nano (JetPack 6.2)  
+**업데이트**: 2025-01-05
 
 ---
 
-## 📋 시스템 요구사항
+## 📋 시스템 구성
 
-- NVIDIA Jetson (Orin, Xavier, Nano 등)
-- Docker & Docker Compose
-- Python 3.8+
-- OpenCV
-- 카메라 디바이스 (`/dev/video0`)
+### Jetson #1 - 사람 감지 및 볶음 모니터링
+- **카메라**: 3대 (GMSL)
+- **기능**: YOLO 사람 감지 (GPU 가속), 주야간 자동 전환, 볶음 모니터링, MQTT 전송
+
+### Jetson #2 - 튀김 AI 및 바켓 감지
+- **카메라**: 4대 (GMSL)
+- **기능**: 튀김 상태 AI 분석, 바켓 감지, 데이터 수집, MQTT 통신
 
 ---
 
-## 🚀 설치 및 실행
+## 🚀 빠른 시작
 
-### Docker 환경 (권장)
-
-```bash
-# 저장소 클론
-git clone https://github.com/yourusername/jetson-camera-monitor.git
-cd jetson-camera-monitor
-
-# X11 권한 설정 (GUI 사용 시)
-xhost +local:docker
-
-# Docker 이미지 빌드 및 실행
-docker-compose build
-docker-compose up -d
-
-# 컨테이너 접속
-docker exec -it my-dev-container bash
-
-# 필수 패키지 설치
-pip3 install pytz
-
-# 모니터링 시스템 실행
-python3 run_monitor.py
-```
-
-### 카메라 디바이스 추가 (필요 시)
-
-카메라를 사용하려면 `docker-compose.camera.yml`을 함께 사용:
+### 1. 배포 가이드 읽기
 
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.camera.yml up -d
+cat 배포가이드.md
 ```
 
-## ⚙️ 설정
+**이 문서 하나만 읽으면 배포 완료!**
 
-### `camera_config.json`
-
-모든 설정은 `camera_config.json` 파일에서 관리합니다:
-
-```json
-{
-  "system": {
-    "timezone": "Asia/Seoul",
-    "log_timezone": true
-  },
-  "camera": {
-    "index": 0,
-    "resolution": {
-      "width": 640,
-      "height": 360
-    },
-    "fps": 120,
-    "name": "Jetson Camera"
-  },
-  "recording": {
-    "codec": "MJPG",
-    "output_dir": "output/recordings",
-    "auto_start": true
-  },
-  "motion_detection": {
-    "enabled": true,
-    "threshold": 1000,
-    "min_area": 500
-  },
-  "screenshot": {
-    "output_dir": "output/screenshots",
-    "format": "jpg",
-    "auto_capture_on_motion": true
-  }
-}
-```
-
-### 🌍 Timezone 설정
-
-배포 환경에 따라 시간대를 변경할 수 있습니다:
-
-```json
-{
-  "system": {
-    "timezone": "Asia/Seoul"     // 한국
-    // "timezone": "Asia/Tokyo"  // 일본
-    // "timezone": "UTC"         // 표준시
-    // "timezone": "America/New_York"  // 미국 동부
-  }
-}
-```
-
-> 💡 사용 가능한 timezone 목록은 [IANA Time Zone Database](https://www.iana.org/time-zones)를 참고하세요.
-
-## 💻 사용법
-
-### 기본 실행
+### 2. 의존성 설치
 
 ```bash
-# 헤드리스 모드 (백그라운드)
-python3 run_monitor.py
-
-# Ctrl+C로 종료
+cd ~/jetson-camera-monitor
+./install.sh
 ```
 
-### GUI 모드
+### 3. 프로그램 실행
 
+**Jetson #1:**
 ```bash
-# 카메라 모듈 직접 사용
-python3 camera_monitor/example.py
-
-# 또는 monitor.py 직접 실행
-python3 -c "from camera_monitor.monitor import quick_start; quick_start()"
+cd jetson1_monitoring
+python3 JETSON1_INTEGRATED.py
 ```
 
-### ⌨️ 키보드 조작 (GUI 모드)
-
-| 키 | 기능 |
-|---|---|
-| `q` | 종료 |
-| `s` | 스크린샷 촬영 |
-| `r` | 녹화 시작/중지 |
-| `m` | 움직임 감지 토글 |
-| `i` | 상태 정보 표시 |
-| `f` | FPS 표시 토글 |
-| `t` | 타임스탬프 표시 토글 |
-| `h` | 도움말 |
-
-### 🐍 Python 코드에서 사용
-
-```python
-from camera_monitor import CameraMonitor
-
-# 모니터 생성 및 실행
-monitor = CameraMonitor(camera_index=0, resolution=(640, 480))
-
-if monitor.initialize():
-    monitor.motion_detector.enable()
-    monitor.start_monitoring()
+**Jetson #2:**
+```bash
+cd jetson2_frying_ai
+python3 JETSON2_INTEGRATED.py
 ```
+
+---
 
 ## 📂 프로젝트 구조
 
 ```
 jetson-camera-monitor/
-├── camera_monitor/          # 카메라 모니터링 패키지
-│   ├── __init__.py
-│   ├── camera_base.py       # 카메라 기본 조작
-│   ├── recorder.py          # 녹화 및 스크린샷
-│   ├── motion_detector.py   # 움직임 감지
-│   ├── monitor.py           # 통합 모니터링
-│   └── example.py           # 사용 예시
-├── tests/                   # 테스트 스크립트
-│   ├── test_camera.py
-│   ├── test_motion.py
-│   └── test_recording.py
-├── config.py                # 설정 관리
-├── utils.py                 # 시간 유틸리티
-├── run_monitor.py           # 메인 실행 스크립트
-├── camera_config.json       # 설정 파일
-├── Dockerfile               # Docker 이미지 정의
-├── docker-compose.yml       # Docker Compose 설정
-├── docker-compose.camera.yml # 카메라 디바이스 추가
-└── README.md
+├── 배포가이드.md                      # ⭐ 배포 시 필독!
+├── README.md                          # 이 문서
+├── requirements.txt                   # Python 패키지 버전 고정
+├── system_check.sh                       # 전체 시스템 검증 (sudo 필요)
+├── install.sh                         # 의존성 설치
+├── check_versions.sh                  # 버전 확인
+├── set_maxn_mode.sh                   # MAXN 성능 모드
+├── install_autostart.sh               # 자동 시작 설정
+├──
+├── jetson1_monitoring/                # Jetson #1 프로그램
+│   ├── JETSON1_INTEGRATED.py
+│   └── config.json
+├──
+├── jetson2_frying_ai/                 # Jetson #2 프로그램
+│   ├── JETSON2_INTEGRATED.py
+│   └── config_jetson2.json
+├──
+├── camera_autostart/                  # GMSL 카메라 드라이버
+│   └── camera_driver_autoload.sh
+└──
+└── docs/                              # 추가 문서
 ```
 
-### 출력 디렉토리
+---
 
+## ⚙️ 주요 설정
+
+### Python 패키지 (버전 고정)
 ```
-project_root/
-├── output/
-│   ├── recordings/          # 녹화 파일 (.avi)
-│   └── screenshots/         # 스크린샷 (.jpg)
+numpy==1.26.4
+opencv-python==4.12.0.88
+ultralytics==8.3.224
+paho-mqtt==2.1.0
+psutil==7.1.3
 ```
 
-## 🧪 테스트
+### 시스템 요구사항
+- JetPack 6.2 (L4T R36.4.3)
+- Python 3.10.12
+- PyTorch 2.8.0 with CUDA 12.6
 
-```bash
-# 카메라 기본 테스트
-python3 tests/test_camera.py
-
-# 움직임 감지 테스트
-python3 tests/test_motion.py
-
-# 녹화 테스트
-python3 tests/test_recording.py
-
-# Config 기반 통합 테스트
-python3 tests/test_with_config.py
-```
+---
 
 ## 🔧 문제 해결
 
-### 카메라를 열 수 없습니다
-
+### GPU 사용 안 됨
 ```bash
-# 사용 가능한 카메라 확인
+python3 -c "import torch; print(torch.cuda.is_available())"
+```
+
+### 카메라 안 보임
+```bash
+cd camera_autostart
+sudo ./camera_driver_autoload.sh
 ls -l /dev/video*
-
-# 권한 확인
-sudo chmod 666 /dev/video0
-
-# Docker에서 카메라 디바이스 마운트 확인
-docker-compose -f docker-compose.yml -f docker-compose.camera.yml up -d
 ```
 
-### GUI 창이 표시되지 않습니다
-
+### 버전 확인
 ```bash
-# X11 권한 설정
-xhost +local:docker
-
-# DISPLAY 환경변수 확인
-echo $DISPLAY
-
-# docker-compose.yml의 DISPLAY 설정 확인
+./check_versions.sh
 ```
 
-### 시간대가 올바르지 않습니다
-
+### 성능 모드 확인
 ```bash
-# Config 확인
-cat camera_config.json | grep timezone
-
-# utils.py에서 timezone 확인
-python3 -c "from utils import get_timezone_name; print(get_timezone_name())"
-
-# 시스템 시간 확인
-date
+sudo nvpmodel -q
+# NV Power Mode: MAXN_SUPER (2) ← 이게 나와야 함
 ```
-
-### 녹화 파일 크기가 너무 작습니다
-
-`camera_config.json`에서 해상도와 FPS 확인:
-
-```json
-{
-  "camera": {
-    "resolution": {
-      "width": 640,
-      "height": 360
-    },
-    "fps": 30  // 너무 높은 FPS는 문제를 일으킬 수 있음
-  }
-}
-```
-
-## 🛠️ 개발 환경
-
-### 로컬 개발
-
-```bash
-# 컨테이너 없이 직접 실행 (테스트용)
-pip3 install opencv-python numpy pytz
-
-python3 run_monitor.py
-```
-
-### 새 기능 추가
-
-`camera_monitor/` 패키지는 모듈화되어 있어 쉽게 확장 가능합니다:
-
-- **새 감지 알고리즘**: `motion_detector.py` 수정
-- **새 저장 포맷**: `recorder.py` 확장
-- **사용자 정의 콜백**: `monitor.py`의 `set_frame_callback()` 사용
 
 ---
 
-## 📝 라이선스
+## 📚 문서
 
-이 프로젝트는 MIT 라이선스로 제공됩니다.
+### 필수
+- **배포가이드.md** - 새 Jetson 배포 시 필독 ⭐
 
-## 🤝 기여하기
-
-Issues와 Pull Requests를 환영합니다!
+### 참고
+- `docs/guides/QUICK_SETUP.md` - jtop, MAXN 모드
+- `docs/guides/GPU_OPTIMIZATION_STATUS.md` - GPU 최적화 상태
+- `jetson1_monitoring/JETSON1_GUIDE.md` - Jetson #1 상세 가이드
+- `jetson2_frying_ai/DATA_COLLECTION_GUIDE_UPDATED.md` - 데이터 수집
 
 ---
 
-<div align="center">
-Made with ❤️ for NVIDIA Jetson
-</div>
+## 🎯 성능 목표
 
+### Jetson #1
+- ✅ GPU 가속 활성화
+- CPU 사용률: <50%
+- FPS: 30
+
+### Jetson #2
+- ✅ GPU 가속 활성화
+- ✅ CPU 최적화 완료
+- CPU 사용률: ~30%
+- FPS: 15 (4개 카메라)
+
+---
+
+## 📝 버전 관리
+
+### 현재 버전 (2025-01-05)
+- ✅ Jetson #1 GPU 가속 활성화
+- ✅ Jetson #2 데이터 수집 기능 추가
+- ✅ MAXN 모드 스크립트 추가
+- ✅ 버전 고정 (requirements.txt)
+- ✅ 폴더명 정리 (jetson1_monitoring, jetson2_frying_ai)
+
+---
+
+## 💡 핵심 포인트
+
+1. ✅ **배포가이드.md** 하나만 읽으면 됨
+2. ✅ **requirements.txt** 덕분에 버전 자동 고정
+3. ✅ **install.sh** 한 번 실행으로 모든 설치 완료
+4. ✅ WiFi는 처음에만 필요, 이후 완전 오프라인
+5. ✅ GPU 가속 자동 활성화
+
+---
+
+**배포 시작하기:** `cat 배포가이드.md` 📖
+
+**문의:** GitHub Issues

@@ -1,0 +1,26 @@
+[Unit]
+Description=Jetson #1 Integrated Monitoring System
+After=network.target graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=dkuyj
+Group=dkuyj
+WorkingDirectory=/home/dkuyj/jetson-camera-monitor/autostart_autodown
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/dkuyj/.Xauthority"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/python3 /home/dkuyj/jetson-camera-monitor/autostart_autodown/JETSON1_INTEGRATED.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security and resource limits
+Nice=-10
+IOSchedulingClass=realtime
+IOSchedulingPriority=0
+
+[Install]
+WantedBy=graphical.target

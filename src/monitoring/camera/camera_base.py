@@ -1,20 +1,41 @@
 """
 카메라 기본 조작 모듈
 카메라 초기화, 프레임 읽기, 설정 등 기본 기능 담당
+LEGACY: This module is kept for backward compatibility.
+New code should use camera_factory.UniversalCamera instead.
 """
 
 import cv2
 import numpy as np
 from typing import Optional, Tuple, Dict, Any
+from .camera_factory import UniversalCamera, CameraConfig, CameraType
 
 
 class CameraBase:
-    """카메라 기본 조작 클래스"""
-    
+    """
+    카메라 기본 조작 클래스
+
+    LEGACY CLASS: This class only supports USB cameras.
+    For GMSL camera support, use UniversalCamera from camera_factory module.
+
+    Example migration:
+        # Old way (USB only):
+        cam = CameraBase(camera_index=0, resolution=(640, 360))
+
+        # New way (USB + GMSL):
+        from camera_factory import CameraConfig, CameraType, UniversalCamera
+        config = CameraConfig(
+            camera_type=CameraType.GMSL,  # or CameraType.USB
+            camera_index=0,
+            resolution=(1920, 1536)
+        )
+        cam = UniversalCamera(config)
+    """
+
     def __init__(self, camera_index: int = 0, resolution: Tuple[int, int] = (640, 360)):
         """
         카메라 기본 설정 초기화
-        
+
         Args:
             camera_index (int): 카메라 인덱스
             resolution (tuple): 해상도 (width, height)

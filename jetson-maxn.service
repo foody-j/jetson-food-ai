@@ -1,0 +1,12 @@
+[Unit]
+Description=Jetson MAXN_SUPER Performance Mode
+After=nvpmodel.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nvpmodel -m 2
+ExecStartPost=/usr/bin/jetson_clocks
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

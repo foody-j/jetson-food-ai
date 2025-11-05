@@ -1,0 +1,165 @@
+#!/bin/bash
+#
+# Installation script for Jetson #1 Integrated Monitoring System
+# Auto-starts the monitoring system on boot with GMSL camera support
+#
+
+set -e  # Exit on error
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+SERVICE_NAME="jetson-monitor.service"
+SERVICE_FILE="$SCRIPT_DIR/$SERVICE_NAME"
+
+echo "=========================================="
+echo "Jetson #1 Monitoring System - Installation"
+echo "=========================================="
+echo ""
+
+# Check if running on Jetson
+if [ ! -f /etc/nv_tegra_release ]; then
+    echo "⚠️  Warning: This doesn't appear to be a Jetson device."
+    read -p "Continue anyway? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+# Check if service file exists
+if [ ! -f "$SERVICE_FILE" ]; then
+    echo "❌ Error: Service file not found: $SERVICE_FILE"
+    exit 1
+fi
+
+# Check if JETSON1_INTEGRATED.py exists
+if [ ! -f "$SCRIPT_DIR/JETSON1_INTEGRATED.py" ]; then
+    echo "❌ Error: JETSON1_INTEGRATED.py not found in $SCRIPT_DIR"
+    exit 1
+fi
+
+# Check if config.json exists
+if [ ! -f "$SCRIPT_DIR/config.json" ]; then
+    echo "❌ Error: config.json not found in $SCRIPT_DIR"
+    exit 1
+fi
+
+echo "📋 Installation Details:"
+echo "   Script directory: $SCRIPT_DIR"
+echo "   Service file: $SERVICE_FILE"
+echo "   User: $USER"
+echo ""
+
+# Read configuration
+CAMERA_TYPE=$(python3 -c "import json; print(json.load(open('$SCRIPT_DIR/config.json'))['camera_type'])")
+echo "📷 Camera Configuration:"
+echo "   Camera type: $CAMERA_TYPE"
+echo ""
+
+# Install v4l-utils if GMSL cameras are used
+if [ "$CAMERA_TYPE" == "gmsl" ]; then
+    echo "🔧 Checking for v4l-utils (required for GMSL cameras)..."
+    if ! command -v v4l2-ctl &> /dev/null; then
+        echo "   Installing v4l-utils..."
+        sudo apt update -qq
+        sudo apt install -y v4l-utils
+        echo "   ✅ v4l-utils installed"
+    else
+        echo "   ✅ v4l-utils already installed"
+    fi
+fi
+
+# Check Python dependencies
+echo ""
+echo "🐍 Checking Python dependencies..."
+REQUIRED_PACKAGES=("cv2" "PIL" "ultralytics" "paho.mqtt.client")
+MISSING_PACKAGES=()
+
+for pkg in "${REQUIRED_PACKAGES[@]}"; do
+    if ! python3 -c "import $pkg" 2>/dev/null; then
+        MISSING_PACKAGES+=("$pkg")
+    fi
+done
+
+if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+    echo "   ⚠️  Missing packages: ${MISSING_PACKAGES[*]}"
+    echo "   Please install them first:"
+    echo "   cd $SCRIPT_DIR && ./install_dependencies.sh"
+    read -p "   Continue installation without dependencies? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+else
+    echo "   ✅ All required packages installed"
+fi
+
+# Make script executable
+echo ""
+echo "🔧 Setting executable permissions..."
+chmod +x "$SCRIPT_DIR/JETSON1_INTEGRATED.py"
+echo "   ✅ Permissions set"
+
+# Install systemd service
+echo ""
+echo "⚙️  Installing systemd service..."
+
+# Stop service if already running
+if systemctl is-active --quiet $SERVICE_NAME; then
+    echo "   Stopping existing service..."
+    sudo systemctl stop $SERVICE_NAME
+fi
+
+# Copy service file
+echo "   Copying service file to /etc/systemd/system/..."
+sudo cp "$SERVICE_FILE" /etc/systemd/system/
+
+# Reload systemd
+echo "   Reloading systemd daemon..."
+sudo systemctl daemon-reload
+
+# Enable service
+echo "   Enabling service to start on boot..."
+sudo systemctl enable $SERVICE_NAME
+
+echo "   ✅ Service installed and enabled"
+
+# Ask if user wants to start service now
+echo ""
+read -p "🚀 Start the monitoring system now? (Y/n): " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+    echo "   Starting service..."
+    sudo systemctl start $SERVICE_NAME
+    sleep 2
+
+    # Check status
+    if systemctl is-active --quiet $SERVICE_NAME; then
+        echo "   ✅ Service started successfully!"
+    else
+        echo "   ⚠️  Service failed to start. Check status with:"
+        echo "      sudo systemctl status $SERVICE_NAME"
+        echo "      sudo journalctl -u $SERVICE_NAME -f"
+    fi
+fi
+
+echo ""
+echo "=========================================="
+echo "✅ Installation Complete!"
+echo "=========================================="
+echo ""
+echo "📖 Useful Commands:"
+echo "   Check status:    sudo systemctl status $SERVICE_NAME"
+echo "   View logs:       sudo journalctl -u $SERVICE_NAME -f"
+echo "   Stop service:    sudo systemctl stop $SERVICE_NAME"
+echo "   Start service:   sudo systemctl start $SERVICE_NAME"
+echo "   Restart service: sudo systemctl restart $SERVICE_NAME"
+echo "   Disable service: sudo systemctl disable $SERVICE_NAME"
+echo ""
+echo "📝 Configuration:"
+echo "   Edit camera settings in: $SCRIPT_DIR/config.json"
+echo "   To switch between USB/GMSL cameras, edit 'camera_type' in config.json"
+echo "   After config changes, restart: sudo systemctl restart $SERVICE_NAME"
+echo ""
+echo "🎯 The monitoring system will now start automatically on boot!"
+echo ""

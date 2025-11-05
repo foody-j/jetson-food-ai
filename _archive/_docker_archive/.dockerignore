@@ -1,0 +1,62 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+
+# Data directories (will be mounted as volumes)
+autostart_autodown/Detection/*
+autostart_autodown/StirFry_Data/*
+!autostart_autodown/Detection/.gitkeep
+!autostart_autodown/StirFry_Data/.gitkeep
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Documentation (except essential ones)
+docs/*
+!docs/GMSL_CAMERA_MIGRATION_GUIDE.md
+
+# Test files
+tests/*
+*.test.py
+
+# Logs
+*.log
+logs/*
+
+# Temporary files
+tmp/*
+temp/*
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (don't copy into image)
+Dockerfile
+docker-compose.yml
+.dockerignore
+docker-run.sh
+
+# README files (except essential)
+README.md
+**/README.md
+!autostart_autodown/README_GMSL.md
+!autostart_autodown/QUICK_START_3_CAMERAS.md
