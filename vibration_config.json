@@ -1,0 +1,48 @@
+{
+  "display_mode": "disp_only",
+  "available_modes": [
+    "disp_only",
+    "disp_fft",
+    "all"
+  ],
+  "baseline_duration_sec": 600,
+  "anomaly_threshold_sigma": 3.0,
+  "port": "/dev/ttyUSB0",
+  "baud": 115200,
+  "unit_ids": ["0x50", "0x51", "0x52"],
+  "window_sec": 5.0,
+  "y_axis_limits": {
+    "acc": {"min": -20, "max": 20},
+    "vel": {"min": -100, "max": 100},
+    "disp": {"min": 0, "max": 100000},
+    "fft": {"min": 0, "max": 1000}
+  },
+  "auto_scale": false,
+  "fault_detection": {
+    "enabled": true,
+    "methods": {
+      "threshold": {
+        "enabled": true,
+        "disp_max": 5000,
+        "vel_max": 500,
+        "acc_max": 10
+      },
+      "baseline": {
+        "enabled": true,
+        "sigma_multiplier": 3.0
+      },
+      "frequency": {
+        "enabled": false,
+        "abnormal_ranges": [
+          {"min": 50, "max": 70},
+          {"min": 120, "max": 150}
+        ]
+      }
+    },
+    "alert": {
+      "console_print": true,
+      "save_event_log": true,
+      "event_log_path": "~/data/vibration_data/fault_events.log"
+    }
+  }
+}
