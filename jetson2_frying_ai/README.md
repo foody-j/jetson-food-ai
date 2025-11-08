@@ -69,6 +69,8 @@ python3 JETSON2_INTEGRATED.py
 
 ## 📂 데이터 저장 위치
 
+**자세한 정보**: `../docs/DATA_STORAGE_MAP.md` 참고
+
 ### 튀김 AI 데이터
 ```
 ~/AI_Data/FryingData/
@@ -130,6 +132,14 @@ python3 -c "import torch; print(torch.cuda.is_available())"
 ```bash
 ls -l /dev/video*
 # video0, video1, video2, video3이 있어야 함
+
+# 카메라 드라이버 수동 로드
+cd ~/jetson-camera-monitor/jetson2_frying_ai/camera_autostart
+sudo ./camera_driver_autoload.sh
+
+# 카메라 드라이버 서비스 확인
+sudo systemctl status sensing-camera.service
+sudo journalctl -u sensing-camera.service -f
 ```
 
 ### 모델 파일 오류
@@ -153,25 +163,56 @@ cd ~/jetson-camera-monitor
 | 문서 | 설명 |
 |------|------|
 | **DATA_COLLECTION_GUIDE_UPDATED.md** | 데이터 수집 상세 가이드 |
+| **../docs/AI_TRAINING_STRATEGY.md** | AI 학습 전략 (필독!) |
 | `_archive/` | 이전 버전 문서 (참고용) |
 
 ---
 
 ## 💡 팁
 
-1. **데이터 수집 확인**
+1. **자동 시작 설정**
+   ```bash
+   cd ~/jetson-camera-monitor/jetson2_frying_ai
+   ./install_autostart.sh
+   ```
+
+   이 스크립트는 다음을 자동으로 설정합니다:
+   - GMSL 카메라 드라이버 자동 로드 (`sensing-camera.service`)
+   - AI 모니터링 시스템 자동 시작 (`jetson2-ai.service`)
+   - v4l-utils 설치 확인
+
+2. **로그 확인**
+   ```bash
+   # AI 모니터링 시스템 로그
+   sudo journalctl -u jetson2-ai.service -f
+
+   # 카메라 드라이버 로그
+   sudo journalctl -u sensing-camera.service -f
+   ```
+
+3. **데이터 수집 확인**
    ```bash
    ls -lh ~/AI_Data/FryingData/
    ```
 
-2. **세션 정보 확인**
+4. **세션 정보 확인**
    ```bash
    cat ~/AI_Data/FryingData/session_*/session_info.json
    ```
 
-3. **프로그램 중지**
+5. **프로그램 중지**
    - GUI에서 ESC 또는 '종료' 버튼
    - 또는 `Ctrl+C`
+
+6. **카메라 드라이버 설정**
+   - 카메라 드라이버는 부팅 시 자동 로드됩니다
+   - 설정 파일: `camera_autostart/camera_driver_autoload.sh`
+   - 해상도, 카메라 타입 등 수정 가능
+   - README: `camera_autostart/README.md`
+
+7. **폰트 설정**
+   - GUI는 **Noto Sans CJK KR** 폰트 사용
+   - 폰트 미설치 시 `install_korean_fonts.sh` 실행
 
 ---
 

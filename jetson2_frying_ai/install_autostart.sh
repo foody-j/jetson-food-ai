@@ -1,18 +1,18 @@
 #!/bin/bash
 #
-# Installation script for Jetson #1 Integrated Monitoring System
-# Auto-starts the monitoring system on boot with GMSL camera support
+# Installation script for Jetson #2 Frying AI Monitoring System
+# Auto-starts the AI monitoring system on boot with GMSL camera support
 #
 
 set -e  # Exit on error
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-SERVICE_NAME="jetson-monitor.service"
+SERVICE_NAME="jetson2-ai.service"
 SERVICE_FILE="$SCRIPT_DIR/$SERVICE_NAME"
 
 echo "=========================================="
-echo "Jetson #1 Monitoring System - Installation"
+echo "Jetson #2 AI Monitoring System - Installation"
 echo "=========================================="
 echo ""
 
@@ -32,15 +32,15 @@ if [ ! -f "$SERVICE_FILE" ]; then
     exit 1
 fi
 
-# Check if JETSON1_INTEGRATED.py exists
-if [ ! -f "$SCRIPT_DIR/JETSON1_INTEGRATED.py" ]; then
-    echo "❌ Error: JETSON1_INTEGRATED.py not found in $SCRIPT_DIR"
+# Check if JETSON2_INTEGRATED.py exists
+if [ ! -f "$SCRIPT_DIR/JETSON2_INTEGRATED.py" ]; then
+    echo "❌ Error: JETSON2_INTEGRATED.py not found in $SCRIPT_DIR"
     exit 1
 fi
 
-# Check if config.json exists
-if [ ! -f "$SCRIPT_DIR/config.json" ]; then
-    echo "❌ Error: config.json not found in $SCRIPT_DIR"
+# Check if config file exists
+if [ ! -f "$SCRIPT_DIR/config_jetson2.json" ]; then
+    echo "❌ Error: config_jetson2.json not found in $SCRIPT_DIR"
     exit 1
 fi
 
@@ -50,70 +50,66 @@ echo "   Service file: $SERVICE_FILE"
 echo "   User: $USER"
 echo ""
 
-# Read configuration
-CAMERA_TYPE=$(python3 -c "import json; print(json.load(open('$SCRIPT_DIR/config.json'))['camera_type'])")
-echo "📷 Camera Configuration:"
-echo "   Camera type: $CAMERA_TYPE"
+# GMSL cameras are always used for Jetson #2
+echo "📷 Camera Configuration: GMSL (4 cameras)"
 echo ""
 
-# Install v4l-utils if GMSL cameras are used
-if [ "$CAMERA_TYPE" == "gmsl" ]; then
-    echo "🔧 Checking for v4l-utils (required for GMSL cameras)..."
-    if ! command -v v4l2-ctl &> /dev/null; then
-        echo "   Installing v4l-utils..."
-        sudo apt update -qq
-        sudo apt install -y v4l-utils
-        echo "   ✅ v4l-utils installed"
+# Install v4l-utils for GMSL cameras
+echo "🔧 Checking for v4l-utils (required for GMSL cameras)..."
+if ! command -v v4l2-ctl &> /dev/null; then
+    echo "   Installing v4l-utils..."
+    sudo apt update -qq
+    sudo apt install -y v4l-utils
+    echo "   ✅ v4l-utils installed"
+else
+    echo "   ✅ v4l-utils already installed"
+fi
+
+# Install camera driver auto-load service
+echo ""
+echo "📷 Setting up GMSL camera driver auto-load..."
+
+CAMERA_AUTOSTART_DIR="$SCRIPT_DIR/camera_autostart"
+CAMERA_SERVICE_NAME="sensing-camera.service"
+
+if [ -d "$CAMERA_AUTOSTART_DIR" ]; then
+    # Make camera driver script executable
+    chmod +x "$CAMERA_AUTOSTART_DIR/camera_driver_autoload.sh"
+
+    # Install camera driver service
+    echo "   Installing camera driver service..."
+    sudo cp "$CAMERA_AUTOSTART_DIR/$CAMERA_SERVICE_NAME" /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl enable $CAMERA_SERVICE_NAME
+
+    # Check if already running
+    if systemctl is-active --quiet $CAMERA_SERVICE_NAME; then
+        echo "   ✅ Camera driver service already running"
     else
-        echo "   ✅ v4l-utils already installed"
-    fi
+        echo "   Starting camera driver service..."
+        sudo systemctl start $CAMERA_SERVICE_NAME
+        sleep 3
 
-    # Install camera driver auto-load service
-    echo ""
-    echo "📷 Setting up GMSL camera driver auto-load..."
-
-    CAMERA_AUTOSTART_DIR="$SCRIPT_DIR/camera_autostart"
-    CAMERA_SERVICE_NAME="sensing-camera.service"
-
-    if [ -d "$CAMERA_AUTOSTART_DIR" ]; then
-        # Make camera driver script executable
-        chmod +x "$CAMERA_AUTOSTART_DIR/camera_driver_autoload.sh"
-
-        # Install camera driver service
-        echo "   Installing camera driver service..."
-        sudo cp "$CAMERA_AUTOSTART_DIR/$CAMERA_SERVICE_NAME" /etc/systemd/system/
-        sudo systemctl daemon-reload
-        sudo systemctl enable $CAMERA_SERVICE_NAME
-
-        # Check if already running
         if systemctl is-active --quiet $CAMERA_SERVICE_NAME; then
-            echo "   ✅ Camera driver service already running"
+            echo "   ✅ Camera driver service started"
         else
-            echo "   Starting camera driver service..."
-            sudo systemctl start $CAMERA_SERVICE_NAME
-            sleep 3
-
-            if systemctl is-active --quiet $CAMERA_SERVICE_NAME; then
-                echo "   ✅ Camera driver service started"
-            else
-                echo "   ⚠️  Camera driver service failed to start"
-                echo "      Check logs: sudo journalctl -u $CAMERA_SERVICE_NAME"
-            fi
+            echo "   ⚠️  Camera driver service failed to start"
+            echo "      Check logs: sudo journalctl -u $CAMERA_SERVICE_NAME"
         fi
-
-        # Verify camera devices
-        echo "   Verifying camera devices..."
-        CAMERA_COUNT=$(ls /dev/video* 2>/dev/null | wc -l)
-        if [ $CAMERA_COUNT -gt 0 ]; then
-            echo "   ✅ Found $CAMERA_COUNT camera device(s)"
-            ls /dev/video* 2>/dev/null | sed 's/^/      /'
-        else
-            echo "   ⚠️  No camera devices found. Driver may need manual loading."
-        fi
-    else
-        echo "   ⚠️  Camera autostart directory not found: $CAMERA_AUTOSTART_DIR"
-        echo "      Camera drivers will need to be loaded manually"
     fi
+
+    # Verify camera devices
+    echo "   Verifying camera devices..."
+    CAMERA_COUNT=$(ls /dev/video* 2>/dev/null | wc -l)
+    if [ $CAMERA_COUNT -gt 0 ]; then
+        echo "   ✅ Found $CAMERA_COUNT camera device(s)"
+        ls /dev/video* 2>/dev/null | sed 's/^/      /'
+    else
+        echo "   ⚠️  No camera devices found. Driver may need manual loading."
+    fi
+else
+    echo "   ⚠️  Camera autostart directory not found: $CAMERA_AUTOSTART_DIR"
+    echo "      Camera drivers will need to be loaded manually"
 fi
 
 # Check Python dependencies
@@ -130,8 +126,7 @@ done
 
 if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
     echo "   ⚠️  Missing packages: ${MISSING_PACKAGES[*]}"
-    echo "   Please install them first:"
-    echo "   cd $SCRIPT_DIR && ./install_dependencies.sh"
+    echo "   Please install them first"
     read -p "   Continue installation without dependencies? (y/N): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -144,7 +139,7 @@ fi
 # Make script executable
 echo ""
 echo "🔧 Setting executable permissions..."
-chmod +x "$SCRIPT_DIR/JETSON1_INTEGRATED.py"
+chmod +x "$SCRIPT_DIR/JETSON2_INTEGRATED.py"
 echo "   ✅ Permissions set"
 
 # Install systemd service
@@ -173,7 +168,7 @@ echo "   ✅ Service installed and enabled"
 
 # Ask if user wants to start service now
 echo ""
-read -p "🚀 Start the monitoring system now? (Y/n): " -n 1 -r
+read -p "🚀 Start the AI monitoring system now? (Y/n): " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Nn]$ ]]; then
     echo "   Starting service..."
@@ -203,10 +198,13 @@ echo "   Start service:   sudo systemctl start $SERVICE_NAME"
 echo "   Restart service: sudo systemctl restart $SERVICE_NAME"
 echo "   Disable service: sudo systemctl disable $SERVICE_NAME"
 echo ""
+echo "   Camera driver:"
+echo "   Check status:    sudo systemctl status $CAMERA_SERVICE_NAME"
+echo "   View logs:       sudo journalctl -u $CAMERA_SERVICE_NAME -f"
+echo ""
 echo "📝 Configuration:"
-echo "   Edit camera settings in: $SCRIPT_DIR/config.json"
-echo "   To switch between USB/GMSL cameras, edit 'camera_type' in config.json"
+echo "   Edit settings in: $SCRIPT_DIR/config_jetson2.json"
 echo "   After config changes, restart: sudo systemctl restart $SERVICE_NAME"
 echo ""
-echo "🎯 The monitoring system will now start automatically on boot!"
+echo "🎯 The AI monitoring system will now start automatically on boot!"
 echo ""

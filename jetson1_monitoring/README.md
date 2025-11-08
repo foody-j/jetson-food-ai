@@ -63,6 +63,8 @@ python3 JETSON1_INTEGRATED.py
 
 ## 📂 데이터 저장 위치
 
+**자세한 정보**: `../docs/DATA_STORAGE_MAP.md` 참고
+
 ### 사람 감지 스냅샷
 ```
 ~/Detection/
@@ -101,6 +103,14 @@ python3 -c "import torch; print(torch.cuda.is_available())"
 ```bash
 ls -l /dev/video*
 # video0, video1, video2가 있어야 함
+
+# 카메라 드라이버 수동 로드
+cd ~/jetson-camera-monitor/jetson1_monitoring/camera_autostart
+sudo ./camera_driver_autoload.sh
+
+# 카메라 드라이버 서비스 확인
+sudo systemctl status sensing-camera.service
+sudo journalctl -u sensing-camera.service -f
 ```
 
 ### 성능이 느림
@@ -126,18 +136,37 @@ cd ~/jetson-camera-monitor
 
 1. **자동 시작 설정**
    ```bash
-   cd ~/jetson-camera-monitor
+   cd ~/jetson-camera-monitor/jetson1_monitoring
    ./install_autostart.sh
    ```
 
+   이 스크립트는 다음을 자동으로 설정합니다:
+   - GMSL 카메라 드라이버 자동 로드 (`sensing-camera.service`)
+   - 모니터링 시스템 자동 시작 (`jetson-monitor.service`)
+   - v4l-utils 설치 확인
+
 2. **로그 확인**
    ```bash
-   sudo journalctl -u jetson-monitor -f
+   # 모니터링 시스템 로그
+   sudo journalctl -u jetson-monitor.service -f
+
+   # 카메라 드라이버 로그
+   sudo journalctl -u sensing-camera.service -f
    ```
 
 3. **프로그램 중지**
    - GUI에서 ESC 또는 'q' 키
    - 또는 `Ctrl+C`
+
+4. **카메라 드라이버 설정**
+   - 카메라 드라이버는 부팅 시 자동 로드됩니다
+   - 설정 파일: `camera_autostart/camera_driver_autoload.sh`
+   - 해상도, 카메라 타입 등 수정 가능
+   - README: `camera_autostart/README.md`
+
+5. **폰트 설정**
+   - GUI는 **Noto Sans CJK KR** 폰트 사용
+   - 폰트 미설치 시 `install_korean_fonts.sh` 실행
 
 ---
 

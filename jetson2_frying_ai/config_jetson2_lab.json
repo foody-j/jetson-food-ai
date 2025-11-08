@@ -1,5 +1,5 @@
 {
-  "// COMMENT": "Jetson #2 Configuration - 4 Camera AI Monitoring System",
+  "// COMMENT": "Jetson #2 LAB Configuration - 4 Camera AI Monitoring System (Laboratory Testing)",
 
   "// Frying AI Configuration (video0, video1)": "",
   "frying_left_camera_index": 0,

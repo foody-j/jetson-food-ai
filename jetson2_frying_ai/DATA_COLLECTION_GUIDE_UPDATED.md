@@ -12,18 +12,24 @@ Jetson #2에 **수동 데이터 수집 기능**이 추가되었습니다!
 ### 🎉 추가된 기능
 
 1. **GUI 버튼**: "📊 수집 시작" / "📊 수집 중지"
-2. **4개 카메라 동시 저장**: 튀김 AI (0, 1) + 바켓 감지 (2, 3)
+2. **4개 카메라 동시 저장**:
+   - ✅ 카메라 0 (튀김 왼쪽) → `~/AI_Data/FryingData/`
+   - ✅ 카메라 1 (튀김 오른쪽) → `~/AI_Data/FryingData/`
+   - ✅ 카메라 2 (바켓 왼쪽) → `~/AI_Data/BucketData/`
+   - ✅ 카메라 3 (바켓 오른쪽) → `~/AI_Data/BucketData/`
 3. **세션별 관리**: 타임스탬프 기반 세션 ID
-4. **자동 저장**: 5초마다 자동 저장 (설정 가능)
+4. **자동 저장**: 5초마다 4개 카메라 동시 저장 (설정 가능)
 5. **실시간 상태 표시**: 저장 개수 실시간 업데이트
 
 ---
 
 ## 🚀 사용 방법
 
-### 1단계: 프로그램 실행
+### 방법 1: GUI로 수집 (권장) - JETSON2_INTEGRATED.py
+
+#### 1단계: 프로그램 실행
 ```bash
-cd ~/jetson-camera-monitor/jetson2_ai
+cd ~/jetson-camera-monitor/jetson2_frying_ai
 python3 JETSON2_INTEGRATED.py
 ```
 
@@ -34,9 +40,15 @@ python3 JETSON2_INTEGRATED.py
 4. 상태 표시: "수집 중: session_20251105_143025"
 
 ### 3단계: 데이터 수집 중
-- **자동 저장**: 5초마다 4개 카메라 프레임 자동 저장
+- **자동 저장**: 5초마다 **4개 카메라 프레임 동시** 자동 저장
+  - 카메라 0 (튀김 왼쪽)
+  - 카메라 1 (튀김 오른쪽)
+  - 카메라 2 (바켓 왼쪽)
+  - 카메라 3 (바켓 오른쪽)
 - **실시간 표시**: 10장마다 저장 개수 업데이트
 - **백그라운드 동작**: AI 분석과 독립적으로 동작
+
+**중요**: 버튼 한 번으로 튀김 AI와 바켓 감지 데이터를 동시에 수집합니다!
 
 ### 4단계: 데이터 수집 종료
 1. **"📊 수집 중지"** 버튼 클릭
@@ -85,7 +97,31 @@ python3 JETSON2_INTEGRATED.py
   "duration_sec": 905.3,
   "collection_interval": 5,
   "cameras_used": [0, 1, 2, 3],
-  "total_saved": 181
+  "total_saved": 181,
+  "camera_config": {
+    "resolution": {
+      "width": 1280,
+      "height": 720
+    },
+    "fps": 30
+  },
+  "mqtt_metadata": [
+    {
+      "timestamp": "2025-01-05 14:30:30.123",
+      "type": "oil_temperature",
+      "position": "left",
+      "value": 175.5,
+      "unit": "celsius"
+    },
+    {
+      "timestamp": "2025-01-05 14:30:35.456",
+      "type": "oil_temperature",
+      "position": "right",
+      "value": 178.2,
+      "unit": "celsius"
+    }
+  ],
+  "metadata_count": 243
 }
 ```
 
@@ -97,6 +133,16 @@ python3 JETSON2_INTEGRATED.py
 - `collection_interval`: 저장 간격 (5초)
 - `cameras_used`: 사용된 카메라 번호
 - `total_saved`: 총 저장 장수 (카메라당 아님, 전체 저장 횟수)
+- `camera_config`: 카메라 설정 (해상도, FPS)
+- `mqtt_metadata`: **MQTT로 받은 조리 정보 (튀김유 온도, 조리 상태 등)**
+- `metadata_count`: MQTT 메타데이터 개수
+
+### 🎯 학습 시 활용
+- **원본 이미지**: `camera_0/`, `camera_1/`, `camera_2/`, `camera_3/`
+- **메타데이터**: `session_info.json`의 `mqtt_metadata`
+  - 튀김유 온도와 이미지 매칭
+  - 조리 타임라인 분석
+  - 온도별 튀김 상태 라벨링 보조
 
 ---
 
@@ -136,16 +182,17 @@ python3 JETSON2_INTEGRATED.py
 - 1장 약 100KB (1280x720, 85% JPEG)
 - **4장 = 약 400KB**
 
-**15분 수집**:
-- 15분 = 900초
-- 900초 ÷ 5초 = 180회
-- 180회 × 400KB = **약 72MB**
-
 **1시간 수집**:
-- 60분 × 4 = 240회
-- 240회 × 400KB = **약 96MB**
+- 720회 × 400KB = **약 288MB**
 
-→ **충분히 관리 가능한 용량!**
+**8시간 (영업시간)**:
+- 8시간 × 288MB = **약 2.3GB/일**
+
+**500GB SSD 기준**:
+- 500GB ÷ 2.3GB/일 = **약 217일 (7개월)**
+- **5일간 수집**: 5일 × 2.3GB = **약 11.5GB** (500GB의 2.3%)
+
+→ **500GB SSD면 충분히 여유롭습니다! 5일은 물론 7개월도 가능!** ✅
 
 ---
 
@@ -321,6 +368,141 @@ tar -czf session_20251105_143025.tar.gz ~/AI_Data/*/session_20251105_143025/
 
 # 전체 백업
 tar -czf ai_data_backup_$(date +%Y%m%d).tar.gz ~/AI_Data/
+```
+
+---
+
+---
+
+## 🛠️ 방법 2: 커맨드라인 도구 - data_collector.py
+
+### 개요
+`data_collector.py`는 **독립적인 데이터 수집 전용 도구**입니다.
+
+### JETSON2_INTEGRATED.py vs data_collector.py
+
+| 항목 | JETSON2_INTEGRATED.py | data_collector.py |
+|------|----------------------|-------------------|
+| **목적** | AI 모니터링 + 데이터 수집 | 데이터 수집 전용 |
+| **GUI** | ✅ 있음 (전체 모니터링) | ❌ 없음 (미니멀) |
+| **AI 분석** | ✅ 튀김 AI + 바켓 감지 | ❌ 없음 |
+| **MQTT** | ✅ 메타데이터 수집 | ❌ 없음 |
+| **카메라 선택** | ❌ 4개 고정 | ✅ 자유 선택 (0,1 또는 2,3) |
+| **모드** | 버튼 수동 제어 | 수동/자동 선택 |
+| **용도** | 실제 운영 환경 | 빠른 데이터 수집 테스트 |
+
+### 언제 사용하나?
+
+#### JETSON2_INTEGRATED.py (권장)
+- ✅ 실제 운영 환경
+- ✅ AI 모니터링 + 데이터 수집 동시
+- ✅ MQTT 메타데이터 필요
+- ✅ GUI 필요
+
+#### data_collector.py
+- ✅ 빠른 데이터 수집 테스트
+- ✅ 특정 카메라만 수집 (튀김만 또는 바켓만)
+- ✅ 헤드리스 환경 (GUI 없이)
+- ✅ AI 분석 불필요
+
+### 사용 예시
+
+#### 예시 1: 튀김 카메라만 수집 (수동 모드)
+```bash
+cd ~/jetson-camera-monitor/jetson2_frying_ai
+python3 data_collector.py --cameras 0,1 --output ~/Test_FryingData --mode manual
+```
+
+**화면 표시**:
+```
+📸 수동 캡처 모드
+키 조작:
+  스페이스바: 캡처
+  'a': 자동 캡처 시작/중지
+  'q': 종료
+```
+
+#### 예시 2: 바켓 카메라만 수집 (수동 모드)
+```bash
+python3 data_collector.py --cameras 2,3 --output ~/Test_BucketData --mode manual
+```
+
+#### 예시 3: 4개 카메라 자동 수집 (헤드리스)
+```bash
+python3 data_collector.py --cameras 0,1,2,3 --output ~/Test_AllData --mode auto --interval 5
+```
+
+**출력**:
+```
+📸 자동 캡처 모드 (헤드리스)
+간격: 5초
+종료: Ctrl+C
+
+[캡처] 2025-01-05 15:30:00
+  ✓ 저장: ~/Test_AllData/camera_0/cam0_20250105_153000.jpg
+  ✓ 저장: ~/Test_AllData/camera_1/cam1_20250105_153000.jpg
+  ✓ 저장: ~/Test_AllData/camera_2/cam2_20250105_153000.jpg
+  ✓ 저장: ~/Test_AllData/camera_3/cam3_20250105_153000.jpg
+  → 4개 파일 저장 완료 (총 4개)
+```
+
+### 옵션 설명
+
+| 옵션 | 설명 | 기본값 | 예시 |
+|------|------|--------|------|
+| `--cameras` | 카메라 인덱스 | `0,1,2,3` | `0,1` (튀김만) |
+| `--output` | 저장 디렉토리 | `./data` | `~/MyData` |
+| `--mode` | 모드 | `manual` | `auto` |
+| `--interval` | 자동 캡처 간격 (초) | `5` | `10` |
+
+### 저장 구조
+
+```
+output_dir/
+├── camera_0/
+│   ├── cam0_20250105_153000.jpg
+│   ├── cam0_20250105_153005.jpg
+│   └── ...
+├── camera_1/
+│   └── ...
+├── camera_2/
+│   └── ...
+└── camera_3/
+    └── ...
+```
+
+**주의**: `session_info.json`은 생성되지 않습니다! (메타데이터 없음)
+
+### 장단점
+
+#### 장점
+- ✅ 빠른 시작 (AI 모델 로딩 불필요)
+- ✅ 특정 카메라만 선택 가능
+- ✅ 간단한 커맨드라인 인터페이스
+- ✅ 헤드리스 환경 지원
+
+#### 단점
+- ❌ MQTT 메타데이터 수집 안 됨
+- ❌ AI 분석 없음 (미리보기 없음)
+- ❌ `session_info.json` 없음
+- ❌ 세션 관리 없음
+
+---
+
+## 📊 비교 요약
+
+### 실제 운영: JETSON2_INTEGRATED.py ✅
+```bash
+python3 JETSON2_INTEGRATED.py
+# GUI에서 "📊 수집 시작" 버튼 클릭
+# → 4개 카메라 + MQTT 메타데이터 + session_info.json
+```
+
+### 빠른 테스트: data_collector.py 🔧
+```bash
+python3 data_collector.py --cameras 0,1 --mode manual
+# 스페이스바로 수동 캡처
+# → 선택한 카메라만, 메타데이터 없음
 ```
 
 ---

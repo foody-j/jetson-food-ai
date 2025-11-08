@@ -86,6 +86,9 @@ python3 JETSON2_INTEGRATED.py
 ### 참고 문서
 | 문서 | 설명 |
 |------|------|
+| `docs/DATA_STORAGE_MAP.md` | **데이터 저장 위치 맵 (필독!)** |
+| `docs/AI_TRAINING_STRATEGY.md` | **AI 학습 전략 (필독!)** |
+| `docs/CH340_USB_RS485_SETUP.md` | **CH340 드라이버 설치 (진동 센서)** |
 | `docs/guides/GPU_OPTIMIZATION_STATUS.md` | GPU 최적화 상태 |
 | `docs/guides/GMSL_CAMERA_MIGRATION_GUIDE.md` | GMSL 카메라 마이그레이션 |
 | `docs/setup/BUILD_AND_TRANSFER.md` | 빌드 및 전송 |
@@ -103,9 +106,18 @@ python3 JETSON2_INTEGRATED.py
 
 ### 자동 시작
 ```bash
+# Jetson #1
+cd ~/jetson-camera-monitor/jetson1_monitoring
 ./install_autostart.sh         # 자동 시작 활성화
-./uninstall_autostart.sh       # 자동 시작 비활성화
-sudo systemctl status jetson-monitor  # 상태 확인
+
+# Jetson #2
+cd ~/jetson-camera-monitor/jetson2_frying_ai
+./install_autostart.sh         # 자동 시작 활성화
+
+# 상태 확인
+sudo systemctl status jetson-monitor.service    # Jetson #1
+sudo systemctl status jetson2-ai.service        # Jetson #2
+sudo systemctl status sensing-camera.service    # 카메라 드라이버
 ```
 
 ### 검증
@@ -142,8 +154,29 @@ python3 -c "import torch; print(torch.cuda.is_available())"
 ### 2. 카메라 안 보임
 ```bash
 ls -l /dev/video*
-cd camera_autostart
+
+# Jetson #1
+cd ~/jetson-camera-monitor/jetson1_monitoring/camera_autostart
 sudo ./camera_driver_autoload.sh
+
+# Jetson #2
+cd ~/jetson-camera-monitor/jetson2_frying_ai/camera_autostart
+sudo ./camera_driver_autoload.sh
+
+# 또는 서비스 확인
+sudo systemctl status sensing-camera.service
+sudo journalctl -u sensing-camera.service -f
+```
+
+### 2-1. 진동 센서 안 보임 (USB-RS485)
+```bash
+ls -l /dev/ttyUSB*
+
+# CH340 드라이버 설치
+cd ~/jetson-camera-monitor
+sudo bash setup_ch340_complete.sh
+
+# 자세한 내용: docs/CH340_USB_RS485_SETUP.md
 ```
 
 ### 3. 성능 느림

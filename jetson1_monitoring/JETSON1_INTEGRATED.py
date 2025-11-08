@@ -91,22 +91,23 @@ STIRFRY_SAVE_RESOLUTION = config.get('stirfry_save_resolution', {'width': 960, '
 STIRFRY_JPEG_QUALITY = config.get('stirfry_jpeg_quality', 70)
 STIRFRY_FRAME_SKIP = config.get('stirfry_frame_skip', 6)
 
-# Fixed parameters
-YOLO_IMGSZ = 416  # Reduced from 640 for better performance
-MOG2_HISTORY = 500
-MOG2_VARTHRESH = 16
-BINARY_THRESH = 200
-WARMUP_FRAMES = 30
+# Motion detection & YOLO parameters (configurable via config.json)
+YOLO_IMGSZ = config.get('yolo_imgsz', 416)  # YOLO 입력 이미지 크기 (높을수록 정확, 느림)
+MOG2_HISTORY = 500  # MOG2 배경 모델 히스토리 프레임 수
+MOG2_VARTHRESH = config.get('mog2_varthresh', 16)  # MOG2 분산 임계값 (낮을수록 민감)
+BINARY_THRESH = config.get('binary_thresh', 200)  # 이진화 임계값 (높을수록 덜 민감)
+WARMUP_FRAMES = 30  # 카메라 워밍업 프레임 수
 
-# GUI Configuration - Auto-adaptive for any display size
-# These are fallback values - will be auto-calculated based on screen
-WINDOW_WIDTH = 720        # Fallback
-WINDOW_HEIGHT = 1280      # Fallback
-LARGE_FONT = ("NanumGothic", 32, "bold")     # Will auto-scale
-MEDIUM_FONT = ("NanumGothic", 24)            # Will auto-scale
-NORMAL_FONT = ("NanumGothic", 18)            # Will auto-scale
-STATUS_FONT = ("NanumGothic", 20, "bold")    # Will auto-scale
-BUTTON_FONT = ("NanumGothic", 22, "bold")    # Will auto-scale
+# GUI Configuration - from config.json (768x1024 세로 모드)
+WINDOW_WIDTH = config.get('window_width', 768)
+WINDOW_HEIGHT = config.get('window_height', 1024)
+FULLSCREEN_MODE = config.get('fullscreen', False)  # 전체화면 모드 설정
+WINDOW_DECORATIONS = config.get('window_decorations', False)  # 창 테두리 표시 여부
+LARGE_FONT = ("Noto Sans CJK KR", config.get('font_large', 28), "bold")
+MEDIUM_FONT = ("Noto Sans CJK KR", config.get('font_medium', 20))
+NORMAL_FONT = ("Noto Sans CJK KR", config.get('font_normal', 16))
+STATUS_FONT = ("Noto Sans CJK KR", config.get('font_status', 18), "bold")
+BUTTON_FONT = ("Noto Sans CJK KR", config.get('font_button', 20), "bold")
 
 # Colors - Premium/Luxury Theme
 COLOR_OK = "#00C853"      # Vibrant Green
@@ -148,9 +149,25 @@ class IntegratedMonitorApp:
         self.root.title("Jetson #1 - Integrated Monitoring System")
         self.running = True
 
-        # Configure window
+        # Configure window (config에서 설정)
         self.root.configure(bg=COLOR_BG)
-        self.root.attributes('-fullscreen', True)
+
+        # Window decorations (config에서 설정)
+        if not WINDOW_DECORATIONS:
+            self.root.overrideredirect(True)
+            print(f"[디스플레이] 창 테두리 숨김")
+
+        # Set window size and position
+        if FULLSCREEN_MODE:
+            # Fullscreen mode
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            self.root.geometry(f"{screen_width}x{screen_height}+0+0")
+            print(f"[디스플레이] 전체화면 모드 ({screen_width}x{screen_height})")
+        else:
+            # Windowed mode
+            self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+0+0")
+            print(f"[디스플레이] 창 모드 ({WINDOW_WIDTH}x{WINDOW_HEIGHT})")
 
         # Keyboard shortcuts
         self.root.bind('<F11>', lambda e: self.toggle_fullscreen())
@@ -170,6 +187,9 @@ class IntegratedMonitorApp:
         self.auto_cap = None
         self.stirfry_left_cap = None
         self.stirfry_right_cap = None
+
+        # Subprocess tracking (진동센서 등)
+        self.child_processes = []
 
         # Recording state
         self.stirfry_recording = False
@@ -226,24 +246,24 @@ class IntegratedMonitorApp:
         print("[초기화] 모든 시스템 초기화 완료!")
 
     def detect_screen_size(self):
-        """Auto-detect screen resolution and calculate adaptive sizes"""
-        # Get actual screen dimensions
-        self.screen_width = self.root.winfo_screenwidth()
-        self.screen_height = self.root.winfo_screenheight()
+        """Use configured window size for layout calculations"""
+        # Use configured window dimensions
+        self.screen_width = WINDOW_WIDTH
+        self.screen_height = WINDOW_HEIGHT
 
-        print(f"[디스플레이] 감지된 화면 크기: {self.screen_width}x{self.screen_height}")
+        print(f"[디스플레이] 설정된 창 크기: {self.screen_width}x{self.screen_height}")
 
         # Detect orientation
         if self.screen_height > self.screen_width:
             self.is_vertical = True
-            print("[디스플레이] 세로 방향 (Portrait) 감지")
+            print("[디스플레이] 세로 방향 (Portrait) 모드")
         else:
             self.is_vertical = False
-            print("[디스플레이] 가로 방향 (Landscape) 감지")
+            print("[디스플레이] 가로 방향 (Landscape) 모드")
 
-        # Calculate adaptive sizes based on screen height
-        # Base: 1280px height → scale proportionally
-        base_height = 1280
+        # Calculate adaptive sizes based on configured height
+        # Base: 1024px height (768x1024 display) → scale proportionally
+        base_height = 1024
         scale_factor = self.screen_height / base_height
 
         # Ensure minimum scale for small screens
@@ -254,20 +274,20 @@ class IntegratedMonitorApp:
         # Store scale factor for layout calculations
         self.scale_factor = scale_factor
 
-        # Calculate font sizes with scaling
-        self.large_font_size = max(20, int(32 * scale_factor))
-        self.medium_font_size = max(16, int(24 * scale_factor))
-        self.normal_font_size = max(12, int(18 * scale_factor))
-        self.status_font_size = max(14, int(20 * scale_factor))
-        self.button_font_size = max(16, int(22 * scale_factor))
+        # Calculate font sizes with scaling (optimized for 768x1024)
+        self.large_font_size = max(20, int(config.get('font_large', 28) * scale_factor))
+        self.medium_font_size = max(16, int(config.get('font_medium', 20) * scale_factor))
+        self.normal_font_size = max(12, int(config.get('font_normal', 16) * scale_factor))
+        self.status_font_size = max(14, int(config.get('font_status', 18) * scale_factor))
+        self.button_font_size = max(16, int(config.get('font_button', 20) * scale_factor))
 
         # Apply dynamic fonts
         global LARGE_FONT, MEDIUM_FONT, NORMAL_FONT, STATUS_FONT, BUTTON_FONT
-        LARGE_FONT = ("NanumGothic", self.large_font_size, "bold")
-        MEDIUM_FONT = ("NanumGothic", self.medium_font_size)
-        NORMAL_FONT = ("NanumGothic", self.normal_font_size)
-        STATUS_FONT = ("NanumGothic", self.status_font_size, "bold")
-        BUTTON_FONT = ("NanumGothic", self.button_font_size, "bold")
+        LARGE_FONT = ("Noto Sans CJK KR", self.large_font_size, "bold")
+        MEDIUM_FONT = ("Noto Sans CJK KR", self.medium_font_size)
+        NORMAL_FONT = ("Noto Sans CJK KR", self.normal_font_size)
+        STATUS_FONT = ("Noto Sans CJK KR", self.status_font_size, "bold")
+        BUTTON_FONT = ("Noto Sans CJK KR", self.button_font_size, "bold")
 
         print(f"[디스플레이] 폰트 크기 자동 조정: "
               f"대형={self.large_font_size}pt, "
@@ -299,7 +319,7 @@ class IntegratedMonitorApp:
         self.system_status_label.pack(anchor="w")
 
         self.date_label = tk.Label(left_frame, text="----/--/--",
-                                   font=("NanumGothic", int(self.normal_font_size * 0.9)),
+                                   font=("Noto Sans CJK KR", int(self.normal_font_size * 0.9)),
                                    bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT)
         self.date_label.pack(anchor="w")
 
@@ -308,11 +328,11 @@ class IntegratedMonitorApp:
         center_frame.grid(row=0, column=1, sticky="n", pady=5)
 
         tk.Label(center_frame, text="현대자동차 울산점",
-                font=("NanumGothic", int(self.large_font_size * 0.85), "bold"),
+                font=("Noto Sans CJK KR", int(self.large_font_size * 0.85), "bold"),
                 bg=COLOR_PANEL, fg=COLOR_ACCENT).pack()
 
         self.time_label = tk.Label(center_frame, text="--:--:--",
-                                   font=("NanumGothic", int(22 * self.scale_factor), "bold"),
+                                   font=("Noto Sans CJK KR", int(22 * self.scale_factor), "bold"),
                                    bg=COLOR_PANEL, fg=COLOR_INFO)
         self.time_label.pack()
 
@@ -322,46 +342,52 @@ class IntegratedMonitorApp:
 
         # PC Status button
         tk.Button(right_frame, text="PC 상태",
-                 font=("NanumGothic", int(self.button_font_size * 0.85), "bold"),
+                 font=("Noto Sans CJK KR", int(self.button_font_size * 0.85), "bold"),
                  command=self.open_pc_status, bg="#00897B", fg="white",
                  relief=tk.FLAT, bd=0, activebackground="#00796B",
                  padx=12, pady=8).pack(side=tk.LEFT, padx=3)
 
         # Vibration check button
         tk.Button(right_frame, text="진동 체크",
-                 font=("NanumGothic", int(self.button_font_size * 0.85), "bold"),
+                 font=("Noto Sans CJK KR", int(self.button_font_size * 0.85), "bold"),
                  command=self.open_vibration_check, bg=COLOR_INFO, fg="white",
                  relief=tk.FLAT, bd=0, activebackground=COLOR_BUTTON_HOVER,
                  padx=12, pady=8).pack(side=tk.LEFT, padx=3)
 
         # Settings button (moved from bottom)
         self.settings_btn = tk.Button(right_frame, text="설정",
-                 font=("NanumGothic", int(self.button_font_size * 0.85), "bold"),
+                 font=("Noto Sans CJK KR", int(self.button_font_size * 0.85), "bold"),
                  command=self.handle_settings_tap, bg=COLOR_BUTTON, fg="white",
                  relief=tk.FLAT, bd=0, activebackground=COLOR_BUTTON_HOVER,
                  padx=12, pady=8)
         self.settings_btn.pack(side=tk.LEFT, padx=3)
 
-        # Main content area - ADAPTIVE STACK
+        # Bottom control bar FIRST (so it's always visible at bottom)
+        self.create_bottom_control_bar()
+
+        # Main content area - ADAPTIVE STACK (fills remaining space)
         self.content_frame = tk.Frame(self.root, bg=COLOR_BG)
         self.content_frame.pack(fill=tk.BOTH, expand=True, padx=padding, pady=int(padding/2))
 
-        # Configure rows/columns for vertical stacking
-        # Fixed height for stir-fry panels so buttons are always visible
-        self.content_frame.rowconfigure(0, weight=3)  # Auto panel (bigger)
-        self.content_frame.rowconfigure(1, weight=0, minsize=int(550 * self.scale_factor))  # Stir-fry panels row (FIXED HEIGHT)
+        # Configure rows for 2-level layout (optimized for 768x1024)
+        # Row 0: Auto panel (전체 너비)
+        # Row 1: Stir-fry LEFT | RIGHT (2칸으로 나눔)
+        self.content_frame.rowconfigure(0, weight=1)  # Auto panel (사람 감시)
+        self.content_frame.rowconfigure(1, weight=1)  # Stir-fry row
         self.content_frame.rowconfigure(2, weight=0)  # Dev panel (hidden by default)
         self.content_frame.columnconfigure(0, weight=1)  # Left column
         self.content_frame.columnconfigure(1, weight=1)  # Right column
 
-        # Panel 1: Auto-start/down (TOP - spans both columns)
+        # Panel 1: Auto-start/down (ROW 0, 전체 너비)
         self.create_auto_panel(self.content_frame)
 
-        # Panel 2 & 3: Stir-fry monitoring LEFT and RIGHT (MIDDLE)
+        # Panel 2: Stir-fry monitoring LEFT (ROW 1, LEFT)
         self.create_stirfry_left_panel(self.content_frame)
+
+        # Panel 3: Stir-fry monitoring RIGHT (ROW 1, RIGHT)
         self.create_stirfry_right_panel(self.content_frame)
 
-        # Panel 4: Developer mode (BOTTOM - hidden by default, spans both columns)
+        # Panel 4: Developer mode (ROW 3 - hidden by default)
         self.dev_panel = None
         self.create_dev_panel(self.content_frame)
 
@@ -373,7 +399,7 @@ class IntegratedMonitorApp:
         # Don't pack it - keep it hidden until 5 taps on Settings
 
     def create_auto_panel(self, parent):
-        """Panel 1: Auto-start/down system - TOP with HORIZONTAL status (spans both columns)"""
+        """Panel 1: Auto-start/down system - ROW 0 (전체 너비)"""
         pad = int(10 * self.scale_factor)
         panel = tk.LabelFrame(parent, text="자동 ON/OFF (사람 감시)", font=LARGE_FONT,
                              bg=COLOR_PANEL, fg=COLOR_ACCENT, bd=2, relief=tk.FLAT,
@@ -410,18 +436,18 @@ class IntegratedMonitorApp:
         self.auto_preview_label.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
 
     def create_stirfry_left_panel(self, parent):
-        """Panel 2: Stir-fry monitoring LEFT - MIDDLE LEFT"""
+        """Panel 2: Stir-fry monitoring LEFT - ROW 1, LEFT"""
         pad = int(10 * self.scale_factor)
         panel = tk.LabelFrame(parent, text="볶음 모니터링 (왼쪽)", font=LARGE_FONT,
                              bg=COLOR_PANEL, fg=COLOR_ACCENT, bd=2, relief=tk.FLAT,
                              highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
         panel.grid(row=1, column=0, padx=pad, pady=int(pad/2), sticky="nsew")
 
-        # Camera preview area - FIXED height to ensure buttons are visible
-        preview_height = int(300 * self.scale_factor)
+        # Camera preview area - fixed height (3단 세로 배치 최적화)
+        preview_height = int(200 * self.scale_factor)
         preview_container = tk.Frame(panel, bg="black", height=preview_height)
-        preview_container.pack(pady=10, padx=10, fill=tk.X)
-        preview_container.pack_propagate(False)  # Don't expand
+        preview_container.pack(pady=5, padx=10, fill=tk.X)
+        preview_container.pack_propagate(False)
 
         self.stirfry_left_preview_label = tk.Label(preview_container, text="[카메라 로딩 중...]",
                                                    bg="black", fg="white", font=NORMAL_FONT)
@@ -429,25 +455,25 @@ class IntegratedMonitorApp:
 
         # Status info
         info_frame = tk.Frame(panel, bg=COLOR_PANEL)
-        info_frame.pack(pady=10)
+        info_frame.pack(pady=10, fill=tk.X)
 
         self.stirfry_left_count_label = tk.Label(info_frame, text="저장: 0장",
                                                  font=MEDIUM_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
         self.stirfry_left_count_label.pack(pady=5)
 
     def create_stirfry_right_panel(self, parent):
-        """Panel 3: Stir-fry monitoring RIGHT - MIDDLE RIGHT"""
+        """Panel 3: Stir-fry monitoring RIGHT - ROW 1, RIGHT"""
         pad = int(10 * self.scale_factor)
         panel = tk.LabelFrame(parent, text="볶음 모니터링 (오른쪽)", font=LARGE_FONT,
                              bg=COLOR_PANEL, fg=COLOR_ACCENT, bd=2, relief=tk.FLAT,
                              highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
         panel.grid(row=1, column=1, padx=pad, pady=int(pad/2), sticky="nsew")
 
-        # Camera preview area - FIXED height to ensure buttons are visible
-        preview_height = int(300 * self.scale_factor)
+        # Camera preview area - fixed height (3단 세로 배치 최적화)
+        preview_height = int(200 * self.scale_factor)
         preview_container = tk.Frame(panel, bg="black", height=preview_height)
-        preview_container.pack(pady=10, padx=10, fill=tk.X)
-        preview_container.pack_propagate(False)  # Don't expand
+        preview_container.pack(pady=5, padx=10, fill=tk.X)
+        preview_container.pack_propagate(False)
 
         self.stirfry_right_preview_label = tk.Label(preview_container, text="[카메라 로딩 중...]",
                                                     bg="black", fg="white", font=NORMAL_FONT)
@@ -455,31 +481,34 @@ class IntegratedMonitorApp:
 
         # Status info
         info_frame = tk.Frame(panel, bg=COLOR_PANEL)
-        info_frame.pack(pady=5)
+        info_frame.pack(pady=10, fill=tk.X)
 
         self.stirfry_right_count_label = tk.Label(info_frame, text="저장: 0장",
                                                   font=MEDIUM_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
         self.stirfry_right_count_label.pack(pady=5)
 
-        # Control buttons - Shared between both cameras (place in right panel)
-        # ALWAYS VISIBLE with fixed positioning
-        btn_frame = tk.Frame(panel, bg=COLOR_PANEL)
-        btn_frame.pack(pady=10, fill=tk.X, padx=20)
+    def create_bottom_control_bar(self):
+        """하단 컨트롤 바 (녹화 버튼들)"""
+        control_bar = tk.Frame(self.root, bg=COLOR_PANEL, bd=1, relief=tk.FLAT,
+                              highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
+        control_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=0, pady=0)
 
-        self.stirfry_start_btn = tk.Button(btn_frame, text="녹화 시작", font=BUTTON_FONT,
+        btn_container = tk.Frame(control_bar, bg=COLOR_PANEL)
+        btn_container.pack(pady=8, padx=10, fill=tk.X)
+
+        self.stirfry_start_btn = tk.Button(btn_container, text="녹화 시작", font=BUTTON_FONT,
                                           command=self.start_stirfry_recording,
                                           bg=COLOR_OK, fg="white", relief=tk.FLAT, bd=0,
                                           activebackground="#00B248", height=2)
         self.stirfry_start_btn.pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
 
-        self.stirfry_stop_btn = tk.Button(btn_frame, text="녹화 중지", font=BUTTON_FONT,
+        self.stirfry_stop_btn = tk.Button(btn_container, text="녹화 중지", font=BUTTON_FONT,
                                          command=self.stop_stirfry_recording,
                                          bg=COLOR_ERROR, fg="white", state=tk.DISABLED,
                                          relief=tk.FLAT, bd=0, activebackground="#C62828", height=2)
         self.stirfry_stop_btn.pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
 
-        # Add EXIT button
-        tk.Button(btn_frame, text="종료", font=BUTTON_FONT,
+        tk.Button(btn_container, text="종료", font=BUTTON_FONT,
                  command=self.on_closing,
                  bg="#424242", fg="white", relief=tk.FLAT, bd=0,
                  activebackground="#616161", height=2).pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
@@ -557,7 +586,7 @@ class IntegratedMonitorApp:
 
         pad = int(10 * self.scale_factor)
         if self.developer_mode:
-            # Show developer panel (spans both columns)
+            # Show developer panel (ROW 2, 전체 너비)
             self.dev_panel.grid(row=2, column=0, columnspan=2, padx=pad, pady=int(pad/2), sticky="nsew")
             self.dev_mode_btn.config(
                 bg=COLOR_WARNING,
@@ -1076,19 +1105,45 @@ class IntegratedMonitorApp:
                 if not self.stirfry_left_preview_visible:
                     self.stirfry_left_preview_visible = True
 
-            # FIXED SIZE: Resize to 640x512 to maintain 5:4 aspect ratio (1920x1536)
-            # Use GPU acceleration if available
+            # Get container size for aspect-fill resize (no letterbox)
+            container_width = self.stirfry_left_preview_label.winfo_width()
+            container_height = self.stirfry_left_preview_label.winfo_height()
+
+            # Use default size if container not yet rendered
+            if container_width <= 1 or container_height <= 1:
+                container_width = int(340 * self.scale_factor)
+                container_height = int(220 * self.scale_factor)
+
+            # Resize to fill container (aspect-fill, may crop)
+            h, w = frame.shape[:2]
+            aspect_frame = w / h
+            aspect_container = container_width / container_height
+
+            if aspect_frame > aspect_container:
+                # Frame is wider - fit height, crop width
+                new_h = container_height
+                new_w = int(new_h * aspect_frame)
+            else:
+                # Frame is taller - fit width, crop height
+                new_w = container_width
+                new_h = int(new_w / aspect_frame)
+
+            # Resize with GPU if available
             if USE_CUDA:
                 try:
                     gpu_frame = cv2.cuda_GpuMat()
                     gpu_frame.upload(frame)
-                    gpu_resized = cv2.cuda.resize(gpu_frame, (640, 512))
+                    gpu_resized = cv2.cuda.resize(gpu_frame, (new_w, new_h))
                     preview = gpu_resized.download()
                 except:
-                    # Fallback to CPU if GPU fails
-                    preview = cv2.resize(frame, (640, 512), interpolation=cv2.INTER_NEAREST)
+                    preview = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
             else:
-                preview = cv2.resize(frame, (640, 512), interpolation=cv2.INTER_NEAREST)
+                preview = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+            # Center crop to container size
+            y_offset = (new_h - container_height) // 2
+            x_offset = (new_w - container_width) // 2
+            preview = preview[y_offset:y_offset+container_height, x_offset:x_offset+container_width]
 
             preview_rgb = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(preview_rgb)
@@ -1115,19 +1170,45 @@ class IntegratedMonitorApp:
                 if not self.stirfry_right_preview_visible:
                     self.stirfry_right_preview_visible = True
 
-            # FIXED SIZE: Resize to 640x512 to maintain 5:4 aspect ratio (1920x1536)
-            # Use GPU acceleration if available
+            # Get container size for aspect-fill resize (no letterbox)
+            container_width = self.stirfry_right_preview_label.winfo_width()
+            container_height = self.stirfry_right_preview_label.winfo_height()
+
+            # Use default size if container not yet rendered
+            if container_width <= 1 or container_height <= 1:
+                container_width = int(340 * self.scale_factor)
+                container_height = int(220 * self.scale_factor)
+
+            # Resize to fill container (aspect-fill, may crop)
+            h, w = frame.shape[:2]
+            aspect_frame = w / h
+            aspect_container = container_width / container_height
+
+            if aspect_frame > aspect_container:
+                # Frame is wider - fit height, crop width
+                new_h = container_height
+                new_w = int(new_h * aspect_frame)
+            else:
+                # Frame is taller - fit width, crop height
+                new_w = container_width
+                new_h = int(new_w / aspect_frame)
+
+            # Resize with GPU if available
             if USE_CUDA:
                 try:
                     gpu_frame = cv2.cuda_GpuMat()
                     gpu_frame.upload(frame)
-                    gpu_resized = cv2.cuda.resize(gpu_frame, (640, 512))
+                    gpu_resized = cv2.cuda.resize(gpu_frame, (new_w, new_h))
                     preview = gpu_resized.download()
                 except:
-                    # Fallback to CPU if GPU fails
-                    preview = cv2.resize(frame, (640, 512), interpolation=cv2.INTER_NEAREST)
+                    preview = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
             else:
-                preview = cv2.resize(frame, (640, 512), interpolation=cv2.INTER_NEAREST)
+                preview = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+            # Center crop to container size
+            y_offset = (new_h - container_height) // 2
+            x_offset = (new_w - container_width) // 2
+            preview = preview[y_offset:y_offset+container_height, x_offset:x_offset+container_width]
 
             preview_rgb = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(preview_rgb)
@@ -1150,11 +1231,9 @@ class IntegratedMonitorApp:
             # Auto camera: hide after 30s of no person detection
             if self.last_person_detected_time is None:
                 # First time, initialize to now to prevent immediate hiding
-                from datetime import datetime
                 self.last_person_detected_time = datetime.now()
                 return True  # First time, always show
 
-            from datetime import datetime
             elapsed = (datetime.now() - self.last_person_detected_time).total_seconds()
             return elapsed < self.preview_hide_delay
 
@@ -1368,7 +1447,7 @@ class IntegratedMonitorApp:
             cpu_frame.pack(pady=10, padx=20, fill=tk.X)
             tk.Label(cpu_frame, text="CPU 사용률:", font=MEDIUM_FONT,
                     bg=COLOR_PANEL, fg=COLOR_TEXT, anchor="w").pack(side=tk.LEFT)
-            tk.Label(cpu_frame, text=f"{cpu_percent:.1f}%", font=("NanumGothic", 22, "bold"),
+            tk.Label(cpu_frame, text=f"{cpu_percent:.1f}%", font=("Noto Sans CJK KR", 22, "bold"),
                     bg=COLOR_PANEL, fg=cpu_color, anchor="e").pack(side=tk.RIGHT)
 
             # Memory Usage
@@ -1380,7 +1459,7 @@ class IntegratedMonitorApp:
             mem_frame.pack(pady=10, padx=20, fill=tk.X)
             tk.Label(mem_frame, text="메모리 사용률:", font=MEDIUM_FONT,
                     bg=COLOR_PANEL, fg=COLOR_TEXT, anchor="w").pack(side=tk.LEFT)
-            tk.Label(mem_frame, text=f"{mem_percent:.1f}%", font=("NanumGothic", 22, "bold"),
+            tk.Label(mem_frame, text=f"{mem_percent:.1f}%", font=("Noto Sans CJK KR", 22, "bold"),
                     bg=COLOR_PANEL, fg=mem_color, anchor="e").pack(side=tk.RIGHT)
 
             # Disk Usage
@@ -1392,7 +1471,7 @@ class IntegratedMonitorApp:
             disk_frame.pack(pady=10, padx=20, fill=tk.X)
             tk.Label(disk_frame, text="디스크 사용률:", font=MEDIUM_FONT,
                     bg=COLOR_PANEL, fg=COLOR_TEXT, anchor="w").pack(side=tk.LEFT)
-            tk.Label(disk_frame, text=f"{disk_percent:.1f}%", font=("NanumGothic", 22, "bold"),
+            tk.Label(disk_frame, text=f"{disk_percent:.1f}%", font=("Noto Sans CJK KR", 22, "bold"),
                     bg=COLOR_PANEL, fg=disk_color, anchor="e").pack(side=tk.RIGHT)
 
             # Temperature (Jetson specific)
@@ -1406,14 +1485,13 @@ class IntegratedMonitorApp:
                     temp_frame.pack(pady=10, padx=20, fill=tk.X)
                     tk.Label(temp_frame, text="CPU 온도:", font=MEDIUM_FONT,
                             bg=COLOR_PANEL, fg=COLOR_TEXT, anchor="w").pack(side=tk.LEFT)
-                    tk.Label(temp_frame, text=f"{temp_celsius:.1f}°C", font=("NanumGothic", 22, "bold"),
+                    tk.Label(temp_frame, text=f"{temp_celsius:.1f}°C", font=("Noto Sans CJK KR", 22, "bold"),
                             bg=COLOR_PANEL, fg=temp_color, anchor="e").pack(side=tk.RIGHT)
             except:
                 pass
 
             # System uptime
             uptime_seconds = int(psutil.boot_time())
-            from datetime import datetime
             boot_time = datetime.fromtimestamp(uptime_seconds)
             uptime = datetime.now() - boot_time
             uptime_str = f"{uptime.days}일 {uptime.seconds // 3600}시간"
@@ -1437,50 +1515,24 @@ class IntegratedMonitorApp:
         print("[PC상태] PC 상태 창 열림")
 
     def open_vibration_check(self):
-        """Open vibration sensor check dialog"""
-        # Create popup window
-        vib_window = tk.Toplevel(self.root)
-        vib_window.title("진동 센서 체크")
-        vib_window.geometry("600x400")
-        vib_window.configure(bg=COLOR_BG)
+        """Open vibration sensor monitoring program"""
+        import subprocess
+        import os
 
-        # Center the window
-        vib_window.transient(self.root)
-        vib_window.grab_set()
+        vibration_script = "/home/dkuyj/jetson-camera-monitor/vibration_sensor_simple.py"
+        vibration_dir = "/home/dkuyj/jetson-camera-monitor"
 
-        # Title
-        tk.Label(vib_window, text="[ 진동 센서 상태 ]", font=LARGE_FONT,
-                bg=COLOR_BG, fg=COLOR_TEXT).pack(pady=20)
+        if not os.path.exists(vibration_script):
+            print(f"[진동] 오류: {vibration_script} 파일이 없습니다")
+            return
 
-        # Status info
-        info_frame = tk.Frame(vib_window, bg=COLOR_PANEL, bd=3, relief=tk.RAISED)
-        info_frame.pack(pady=20, padx=40, fill=tk.BOTH, expand=True)
-
-        tk.Label(info_frame, text="센서: 미연결", font=("NanumGothic", 20),
-                bg=COLOR_PANEL, fg=COLOR_WARNING).pack(pady=20)
-
-        tk.Label(info_frame, text="USB2RS485 연결 대기 중", font=MEDIUM_FONT,
-                bg=COLOR_PANEL, fg=COLOR_TEXT).pack(pady=10)
-
-        tk.Label(info_frame, text="향후 구현 예정:", font=NORMAL_FONT,
-                bg=COLOR_PANEL, fg="#90A4AE").pack(pady=20)
-
-        features = [
-            "- 초기 시동 시 진동 체크",
-            "- 로봇 캘리브레이션 후 검증",
-            "- 이상 진동 감지 시 알림"
-        ]
-
-        for feature in features:
-            tk.Label(info_frame, text=feature, font=NORMAL_FONT,
-                    bg=COLOR_PANEL, fg=COLOR_TEXT, anchor="w").pack(pady=2)
-
-        # Close button
-        tk.Button(vib_window, text="[ 닫기 ]", font=MEDIUM_FONT,
-                 command=vib_window.destroy, width=15,
-                 bg=COLOR_INFO, fg="white").pack(pady=20)
-
-        print("[진동] 진동 센서 체크 창 열림")
+        try:
+            # 진동 센서 프로그램을 별도 프로세스로 실행 (작업 디렉토리 지정)
+            proc = subprocess.Popen(["python3", vibration_script], cwd=vibration_dir)
+            self.child_processes.append(proc)
+            print("[진동] 진동 센서 프로그램 실행")
+        except Exception as e:
+            print(f"[진동] 실행 오류: {e}")
 
     def handle_settings_tap(self):
         """Handle settings button tap - 5 taps reveals shutdown"""
@@ -1535,30 +1587,86 @@ class IntegratedMonitorApp:
             print("[화면] Windowed 모드")
 
     def on_closing(self):
-        """Handle window close"""
-        if messagebox.askokcancel("종료", "프로그램을 종료하시겠습니까?"):
+        """Handle window close - 백그라운드에서 정리"""
+        # messagebox를 위한 최상위 창 생성
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()  # 숨기기
+        dialog.attributes('-topmost', True)  # 항상 최상위
+
+        # messagebox를 이 창의 자식으로 표시
+        result = messagebox.askokcancel("종료", "프로그램을 종료하시겠습니까?", parent=dialog)
+        dialog.destroy()
+
+        if result:
             print("[종료] 시스템 종료 중...")
             self.running = False
 
-            # Cleanup GstCamera cameras (use stop() method)
-            if self.auto_cap is not None:
-                print("[종료] 자동 카메라 중지 중...")
-                self.auto_cap.stop()
+            # 백그라운드 스레드에서 정리 작업 수행 (UI 프리징 방지)
+            def cleanup_and_exit():
+                try:
+                    # Cleanup child processes (진동센서 등)
+                    for proc in self.child_processes:
+                        try:
+                            if proc.poll() is None:
+                                print(f"[종료] 자식 프로세스 종료 중... (PID: {proc.pid})")
+                                proc.terminate()
+                                try:
+                                    proc.wait(timeout=1)  # 1초만 대기
+                                except:
+                                    proc.kill()
+                        except Exception as e:
+                            print(f"[종료] 자식 프로세스 종료 오류: {e}")
 
-            if self.stirfry_left_cap is not None:
-                print("[종료] 왼쪽 카메라 중지 중...")
-                self.stirfry_left_cap.stop()
+                    # Cleanup GstCamera cameras
+                    if self.auto_cap is not None:
+                        print("[종료] 자동 카메라 중지 중...")
+                        try:
+                            self.auto_cap.stop()
+                        except:
+                            pass
 
-            if self.stirfry_right_cap is not None:
-                print("[종료] 오른쪽 카메라 중지 중...")
-                self.stirfry_right_cap.stop()
+                    if self.stirfry_left_cap is not None:
+                        print("[종료] 왼쪽 카메라 중지 중...")
+                        try:
+                            self.stirfry_left_cap.stop()
+                        except:
+                            pass
 
-            # Cleanup MQTT
-            if self.mqtt_client is not None:
-                self.mqtt_client.disconnect()
+                    if self.stirfry_right_cap is not None:
+                        print("[종료] 오른쪽 카메라 중지 중...")
+                        try:
+                            self.stirfry_right_cap.stop()
+                        except:
+                            pass
 
+                    # Cleanup MQTT
+                    if self.mqtt_client is not None:
+                        try:
+                            self.mqtt_client.disconnect()
+                        except:
+                            pass
+
+                except Exception as e:
+                    print(f"[종료] 정리 중 오류: {e}")
+                finally:
+                    # UI는 메인 스레드에서 종료
+                    self.root.after(0, self._final_destroy)
+
+            # 백그라운드 스레드 시작
+            import threading
+            cleanup_thread = threading.Thread(target=cleanup_and_exit, daemon=True)
+            cleanup_thread.start()
+
+    def _final_destroy(self):
+        """최종 창 파괴 (메인 스레드에서 실행)"""
+        try:
+            self.root.quit()
             self.root.destroy()
-            print("[종료] 프로그램 종료 완료")
+        except:
+            pass
+        print("[종료] 프로그램 종료 완료")
+        import sys
+        sys.exit(0)
 
 
 # =========================

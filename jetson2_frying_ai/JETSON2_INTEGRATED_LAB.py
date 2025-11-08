@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Jetson Orin #2 - Integrated AI Monitoring System
+Jetson Orin #2 - Integrated AI Monitoring System (LAB VERSION)
 - Frying AI (튀김 AI - 2 cameras: video0 left, video1 right)
 - Observe_add (Bucket detection: video2 left, video3 right)
 - MQTT Communication
 - PC Status Check
 - Vibration Sensor Check
+- Manual food type selection (LAB ONLY)
+- Manual completion marking button (LAB ONLY)
 
-Designed for kitchen staff (40-50 years old) - Large, clear, simple interface
+Designed for laboratory pilot testing
 """
 
 import tkinter as tk
@@ -47,8 +49,8 @@ except ImportError:
 # =========================
 # Load Configuration
 # =========================
-def load_config(config_path="config_jetson2.json"):
-    """Load configuration from JSON file"""
+def load_config(config_path="config_jetson2_lab.json"):
+    """Load configuration from JSON file (LAB version)"""
     # Get script directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_full_path = os.path.join(script_dir, config_path)
@@ -748,6 +750,21 @@ class JetsonIntegratedApp:
         )
         self.btn_start_collection.pack(side=tk.LEFT, padx=5)
 
+        self.btn_mark_completion = tk.Button(
+            btn_frame,
+            text="✅ 완료 마킹",
+            font=BUTTON_FONT,
+            bg="#F39C12",
+            fg="white",
+            activebackground="#E67E22",
+            command=self.mark_completion_manual,
+            width=10,
+            height=1,
+            state=tk.DISABLED,
+            relief=tk.FLAT
+        )
+        self.btn_mark_completion.pack(side=tk.LEFT, padx=5)
+
         self.btn_stop_collection = tk.Button(
             btn_frame,
             text="📊 수집 중지",
@@ -1427,6 +1444,116 @@ class JetsonIntegratedApp:
         """Open settings dialog (placeholder)"""
         messagebox.showinfo("설정", "설정 기능은 준비 중입니다.\nconfig_jetson2.json 파일을 직접 수정하세요.")
 
+    def select_food_type(self):
+        """Show food type selection dialog"""
+        # Create popup window
+        dialog = tk.Toplevel(self.root)
+        dialog.title("음식 종류 선택")
+        dialog.geometry("500x450")
+        dialog.configure(bg=COLOR_BG)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (500 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (450 // 2)
+        dialog.geometry(f"500x450+{x}+{y}")
+
+        selected_food = {"value": None}
+
+        # Title
+        tk.Label(dialog, text="[ 음식 종류 선택 ]", font=LARGE_FONT,
+                bg=COLOR_BG, fg=COLOR_TEXT).pack(pady=20)
+
+        # Buttons frame
+        button_frame = tk.Frame(dialog, bg=COLOR_BG)
+        button_frame.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
+
+        # Food type buttons
+        food_icons = {
+            "chicken": "🍗",
+            "shrimp": "🍤",
+            "potato": "🥔",
+            "dumpling": "🥟",
+            "pork_cutlet": "🥩",
+            "fish": "🐟"
+        }
+
+        food_names = {
+            "chicken": "치킨",
+            "shrimp": "새우",
+            "potato": "감자",
+            "dumpling": "만두",
+            "pork_cutlet": "돈까스",
+            "fish": "생선"
+        }
+
+        def select(food_type):
+            selected_food["value"] = food_type
+            dialog.destroy()
+
+        for idx, food in enumerate(FOOD_TYPES):
+            icon = food_icons.get(food, "🍴")
+            name = food_names.get(food, food)
+
+            btn = tk.Button(
+                button_frame,
+                text=f"{icon} {name}",
+                font=("Noto Sans CJK KR", 18, "bold"),
+                bg=COLOR_BUTTON,
+                fg="white",
+                activebackground=COLOR_BUTTON_HOVER,
+                command=lambda f=food: select(f),
+                width=15,
+                height=2,
+                relief=tk.FLAT
+            )
+            btn.pack(pady=8)
+
+        # Cancel button
+        tk.Button(dialog, text="[ 취소 ]", font=MEDIUM_FONT,
+                 command=dialog.destroy, width=15,
+                 bg="#95A5A6", fg="white", relief=tk.FLAT).pack(pady=20)
+
+        dialog.wait_window()
+        return selected_food["value"]
+
+    def mark_completion_manual(self):
+        """Manually mark completion point (button click)"""
+        if not self.data_collection_active:
+            return
+
+        if self.collection_completion_marked:
+            messagebox.showinfo("알림", "이미 완료 시점이 마킹되었습니다!")
+            return
+
+        from datetime import datetime
+        elapsed = (datetime.now() - self.collection_start_time).total_seconds()
+
+        self.collection_completion_marked = True
+        self.collection_completion_time = datetime.now()
+        self.collection_completion_info = {
+            "method": "manual",
+            "timestamp": self.collection_completion_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "elapsed_time_sec": elapsed,
+            "frame_index": self.collection_frame_counter,
+            "oil_temp_left": self.oil_temp_left,
+            "oil_temp_right": self.oil_temp_right,
+            "probe_temp_left": self.probe_temp_left,
+            "probe_temp_right": self.probe_temp_right
+        }
+
+        # Update UI
+        self.btn_mark_completion.config(state=tk.DISABLED, bg="#27AE60", text="✅ 완료됨")
+        self.collection_status_label.config(
+            text=f"수집 중 [{self.current_food_type}] - 완료 마킹됨 ({elapsed:.0f}초)",
+            fg="#27AE60"
+        )
+
+        print(f"[완료마킹] 수동 마킹: {elapsed:.1f}초")
+        print(f"[완료마킹] 탐침온도: L={self.probe_temp_left}°C, R={self.probe_temp_right}°C")
+
     def mark_completion_auto(self, position, probe_temp):
         """Automatically mark completion when probe temp reaches target"""
         if not self.data_collection_active:
@@ -1454,6 +1581,7 @@ class JetsonIntegratedApp:
         }
 
         # Update UI
+        self.btn_mark_completion.config(state=tk.DISABLED, bg="#27AE60", text="✅ 완료됨")
         self.collection_status_label.config(
             text=f"수집 중 [{self.current_food_type}] - 자동 완료 ({elapsed:.0f}초)",
             fg="#27AE60"
@@ -1503,19 +1631,16 @@ class JetsonIntegratedApp:
         print("[바켓 감지] 중지됨")
 
     def start_data_collection(self):
-        """Start manual data collection (Production version - MQTT only)"""
+        """Start manual data collection"""
         from datetime import datetime
         import os
 
-        # Production: food_type comes from MQTT only
-        if self.current_food_type == "unknown":
-            messagebox.showwarning(
-                "경고",
-                "음식 종류가 설정되지 않았습니다.\n\n"
-                "로봇 PC에서 MQTT로 음식 종류를 전송해주세요.\n"
-                f"Topic: {MQTT_TOPIC_FOOD_TYPE}"
-            )
-            return
+        # Show food type selection dialog
+        food_type = self.select_food_type()
+        if food_type is None:
+            return  # User cancelled
+
+        self.current_food_type = food_type
 
         # Create session ID
         self.collection_session_id = datetime.now().strftime("session_%Y%m%d_%H%M%S")
@@ -1541,14 +1666,12 @@ class JetsonIntegratedApp:
         self.data_collection_active = True
         self.collection_metadata = []  # Reset metadata
         self.btn_start_collection.config(state=tk.DISABLED)
+        self.btn_mark_completion.config(state=tk.NORMAL)
         self.btn_stop_collection.config(state=tk.NORMAL)
-        self.collection_status_label.config(
-            text=f"수집 중 [{self.current_food_type}]: {self.collection_session_id}",
-            fg="#9B59B6"
-        )
+        self.collection_status_label.config(text=f"수집 중 [{food_type}]: {self.collection_session_id}", fg="#9B59B6")
 
         print(f"[데이터수집] 시작: {self.collection_session_id}")
-        print(f"[데이터수집] 음식 종류: {self.current_food_type} (MQTT)")
+        print(f"[데이터수집] 음식 종류: {self.current_food_type}")
         print(f"[데이터수집] 저장 경로: {base_dir}/AI_Data/")
         print(f"[데이터수집] MQTT 메타데이터 수집 활성화")
 
@@ -1616,6 +1739,7 @@ class JetsonIntegratedApp:
 
         # Update GUI
         self.btn_start_collection.config(state=tk.NORMAL)
+        self.btn_mark_completion.config(state=tk.DISABLED, bg="#F39C12", text="✅ 완료 마킹")
         self.btn_stop_collection.config(state=tk.DISABLED)
         self.collection_status_label.config(text="수집: 대기 중", fg=COLOR_TEXT)
 

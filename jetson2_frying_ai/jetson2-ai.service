@@ -1,0 +1,19 @@
+[Unit]
+Description=Jetson #2 Frying AI Monitoring System
+After=network.target sensing-camera.service
+Wants=sensing-camera.service
+
+[Service]
+Type=simple
+User=dkuyj
+WorkingDirectory=/home/dkuyj/jetson-camera-monitor/jetson2_frying_ai
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/dkuyj/.Xauthority"
+ExecStart=/usr/bin/python3 /home/dkuyj/jetson-camera-monitor/jetson2_frying_ai/JETSON2_INTEGRATED.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
