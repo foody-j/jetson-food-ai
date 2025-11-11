@@ -1103,15 +1103,19 @@ class IntegratedMonitorApp:
 
         # If recording, save frames (skip frames to prevent freezing + save storage)
         if self.stirfry_recording:
-            self.stirfry_frame_skip_counter += 1
+            # Each camera manages its own counter independently
+            if not hasattr(self, 'stirfry_left_skip_counter'):
+                self.stirfry_left_skip_counter = 0
+
+            self.stirfry_left_skip_counter += 1
             # Save every Nth frame (configurable via STIRFRY_FRAME_SKIP)
-            # BOTH cameras save when counter hits threshold, THEN reset
-            if self.stirfry_frame_skip_counter >= STIRFRY_FRAME_SKIP:
+            if self.stirfry_left_skip_counter >= STIRFRY_FRAME_SKIP:
                 # Debug: First save notification
                 if self.stirfry_left_frame_count == 0:
                     print("[볶음 왼쪽] 첫 프레임 저장 시작...")
                 # Save in background thread to prevent GUI blocking
                 threading.Thread(target=self.save_stirfry_left_frame, args=(frame.copy(),), daemon=True).start()
+                self.stirfry_left_skip_counter = 0  # Reset counter after saving
 
         # Update preview
         self.update_stirfry_left_preview(frame)
@@ -1140,16 +1144,19 @@ class IntegratedMonitorApp:
 
         # If recording, save frames (skip frames to prevent freezing + save storage)
         if self.stirfry_recording:
-            # Same counter - save when it hits threshold, THEN reset after BOTH cameras save
-            if self.stirfry_frame_skip_counter >= STIRFRY_FRAME_SKIP:
+            # Each camera manages its own counter independently
+            if not hasattr(self, 'stirfry_right_skip_counter'):
+                self.stirfry_right_skip_counter = 0
+
+            self.stirfry_right_skip_counter += 1
+            # Save every Nth frame (configurable via STIRFRY_FRAME_SKIP)
+            if self.stirfry_right_skip_counter >= STIRFRY_FRAME_SKIP:
                 # Debug: First save notification
                 if self.stirfry_right_frame_count == 0:
                     print("[볶음 오른쪽] 첫 프레임 저장 시작...")
                 # Save in background thread to prevent GUI blocking
                 threading.Thread(target=self.save_stirfry_right_frame, args=(frame.copy(),), daemon=True).start()
-
-                # Reset counter AFTER both cameras have saved
-                self.stirfry_frame_skip_counter = 0
+                self.stirfry_right_skip_counter = 0  # Reset counter after saving
 
         # Update preview
         self.update_stirfry_right_preview(frame)

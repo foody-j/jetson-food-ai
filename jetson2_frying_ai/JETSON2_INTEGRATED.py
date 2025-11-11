@@ -1038,6 +1038,19 @@ class JetsonIntegratedApp:
             # Store latest frame for data collection
             self.latest_frying_left_frame = frame.copy()
 
+            # Data collection timer (shared across all active cameras)
+            if self.data_collection_active:
+                self.collection_timer += GUI_UPDATE_INTERVAL / 1000.0
+                if self.collection_timer >= self.collection_interval:
+                    self.collection_timer = 0
+                    # Trigger data collection from all cameras
+                    self.save_collection_data(
+                        self.latest_frying_left_frame,
+                        self.latest_frying_right_frame,
+                        self.latest_observe_left_frame,
+                        self.latest_observe_right_frame
+                    )
+
         self.root.after(GUI_UPDATE_INTERVAL, self.update_frying_left)
 
     def update_frying_right(self):
@@ -1123,12 +1136,12 @@ class JetsonIntegratedApp:
             # Store latest frame for data collection
             self.latest_frying_right_frame = frame.copy()
 
-            # Periodic data collection (check every second, save every N seconds)
-            if self.data_collection_active:
-                self.collection_timer += GUI_UPDATE_INTERVAL / 1000.0  # Convert ms to seconds
+            # Data collection timer (only if frying_left is not active)
+            if self.data_collection_active and self.frying_left_cap is None:
+                self.collection_timer += GUI_UPDATE_INTERVAL / 1000.0
                 if self.collection_timer >= self.collection_interval:
                     self.collection_timer = 0
-                    # Trigger data collection from all 4 cameras
+                    # Trigger data collection from all cameras
                     self.save_collection_data(
                         self.latest_frying_left_frame,
                         self.latest_frying_right_frame,
@@ -1264,6 +1277,19 @@ class JetsonIntegratedApp:
             # Store latest frame for data collection
             self.latest_observe_left_frame = frame.copy()
 
+            # Data collection timer (only if frying cameras are not active)
+            if self.data_collection_active and self.frying_left_cap is None and self.frying_right_cap is None:
+                self.collection_timer += GUI_UPDATE_INTERVAL / 1000.0
+                if self.collection_timer >= self.collection_interval:
+                    self.collection_timer = 0
+                    # Trigger data collection from all cameras
+                    self.save_collection_data(
+                        self.latest_frying_left_frame,
+                        self.latest_frying_right_frame,
+                        self.latest_observe_left_frame,
+                        self.latest_observe_right_frame
+                    )
+
         self.root.after(GUI_UPDATE_INTERVAL, self.update_observe_left)
 
     def update_observe_right(self):
@@ -1388,6 +1414,22 @@ class JetsonIntegratedApp:
 
             # Store latest frame for data collection
             self.latest_observe_right_frame = frame.copy()
+
+            # Data collection timer (last fallback - only if all other cameras are not active)
+            if (self.data_collection_active and
+                self.frying_left_cap is None and
+                self.frying_right_cap is None and
+                self.observe_left_cap is None):
+                self.collection_timer += GUI_UPDATE_INTERVAL / 1000.0
+                if self.collection_timer >= self.collection_interval:
+                    self.collection_timer = 0
+                    # Trigger data collection from all cameras
+                    self.save_collection_data(
+                        self.latest_frying_left_frame,
+                        self.latest_frying_right_frame,
+                        self.latest_observe_left_frame,
+                        self.latest_observe_right_frame
+                    )
 
         self.root.after(GUI_UPDATE_INTERVAL, self.update_observe_right)
 
