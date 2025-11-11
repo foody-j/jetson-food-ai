@@ -193,9 +193,12 @@ class GstCamera:
         if self.pipeline:
             self.pipeline.set_state(Gst.State.NULL)
 
-        # Wait for thread to finish
+        # Wait for thread to finish (only if not called from the same thread)
         if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=2.0)
+            if threading.current_thread() != self.thread:
+                self.thread.join(timeout=2.0)
+            else:
+                print(f"[GstCamera] Skipping join (called from same thread)")
 
         print(f"[GstCamera] Camera {self.device_index} stopped")
 
