@@ -62,6 +62,7 @@ DAY_START = dtime(sh, sm)
 DAY_END = dtime(eh, em)
 
 MODEL_PATH = config['yolo_model']
+CAMERA_PERSON_ENABLED = config.get('camera_person_enabled', True)
 CAMERA_INDEX = config['camera_index']
 CAMERA_TYPE = config.get('camera_type', 'usb')  # Default to USB if not specified
 CAMERA_RESOLUTION = config.get('camera_resolution', {'width': 640, 'height': 360})
@@ -99,11 +100,13 @@ MQTT_CLIENT_ID = config.get('mqtt_client_id', 'robotcam_jetson')
 AI_MODE_ENABLED = config.get('ai_mode_enabled', False)
 
 # Stir-fry monitoring configuration - TWO CAMERAS
+STIRFRY_LEFT_ENABLED = config.get('stirfry_left_enabled', True)
 STIRFRY_LEFT_CAMERA_TYPE = config.get('stirfry_left_camera_type', 'usb')
 STIRFRY_LEFT_CAMERA_INDEX = config.get('stirfry_left_camera_index', 1)  # Video1 (CN5)
 STIRFRY_LEFT_GMSL_MODE = config.get('stirfry_left_gmsl_mode', 2)
 STIRFRY_LEFT_GMSL_RESOLUTION_MODE = config.get('stirfry_left_gmsl_resolution_mode', 1)
 
+STIRFRY_RIGHT_ENABLED = config.get('stirfry_right_enabled', True)
 STIRFRY_RIGHT_CAMERA_TYPE = config.get('stirfry_right_camera_type', 'usb')
 STIRFRY_RIGHT_CAMERA_INDEX = config.get('stirfry_right_camera_index', 2)  # Video2 (CN6)
 STIRFRY_RIGHT_GMSL_MODE = config.get('stirfry_right_gmsl_mode', 2)
@@ -742,64 +745,78 @@ class IntegratedMonitorApp:
             print(f"[MQTT] 제어 명령 수신 오류: {e}")
 
     def init_cameras(self):
-        """Initialize all cameras with GStreamer (optimized for UYVY)"""
-        print("[카메라] GStreamer 기반 카메라 초기화 시작...")
+        """Initialize cameras based on enabled settings"""
+        print("[카메라] 카메라 초기화 시작...")
 
-        # Camera 1: Auto-start/down system
-        try:
-            print(f"[카메라] 자동 ON/OFF 카메라 ({CAMERA_TYPE.upper()} #{CAMERA_INDEX}) 시작 중...")
-            self.auto_cap = GstCamera(
-                device_index=CAMERA_INDEX,
-                width=CAMERA_RESOLUTION['width'],
-                height=CAMERA_RESOLUTION['height'],
-                fps=CAMERA_FPS
-            )
-            if self.auto_cap.start():
-                print(f"[카메라] 자동 ON/OFF 카메라 초기화 완료 ✓")
-            else:
-                print(f"[오류] 자동 ON/OFF 카메라 초기화 실패")
+        # Initialize cameras to None first
+        self.auto_cap = None
+        self.stirfry_left_cap = None
+        self.stirfry_right_cap = None
+
+        # Camera 1: Auto-start/down system (Person detection)
+        if CAMERA_PERSON_ENABLED:
+            try:
+                print(f"[카메라] 사람 감지 카메라 ({CAMERA_TYPE.upper()} #{CAMERA_INDEX}) 시작 중...")
+                self.auto_cap = GstCamera(
+                    device_index=CAMERA_INDEX,
+                    width=CAMERA_RESOLUTION['width'],
+                    height=CAMERA_RESOLUTION['height'],
+                    fps=CAMERA_FPS
+                )
+                if self.auto_cap.start():
+                    print(f"[카메라] 사람 감지 카메라 초기화 완료 ✓")
+                else:
+                    print(f"[카메라] 사람 감지 카메라 초기화 실패 ✗")
+                    self.auto_cap = None
+            except Exception as e:
+                print(f"[카메라] 사람 감지 카메라 초기화 실패: {e}")
                 self.auto_cap = None
-        except Exception as e:
-            print(f"[오류] 자동 카메라 초기화 실패: {e}")
-            self.auto_cap = None
+        else:
+            print(f"[카메라] 사람 감지 카메라 비활성화됨 (camera_person_enabled=false)")
 
         # Camera 2: Stir-fry monitoring LEFT
-        try:
-            print(f"[카메라] 볶음 왼쪽 카메라 ({STIRFRY_LEFT_CAMERA_TYPE.upper()} #{STIRFRY_LEFT_CAMERA_INDEX}) 시작 중...")
-            self.stirfry_left_cap = GstCamera(
-                device_index=STIRFRY_LEFT_CAMERA_INDEX,
-                width=1920,
-                height=1536,
-                fps=CAMERA_FPS
-            )
-            if self.stirfry_left_cap.start():
-                print(f"[카메라] 볶음 왼쪽 카메라 초기화 완료 ✓")
-            else:
-                print(f"[오류] 볶음 왼쪽 카메라 초기화 실패")
+        if STIRFRY_LEFT_ENABLED:
+            try:
+                print(f"[카메라] 볶음 왼쪽 카메라 ({STIRFRY_LEFT_CAMERA_TYPE.upper()} #{STIRFRY_LEFT_CAMERA_INDEX}) 시작 중...")
+                self.stirfry_left_cap = GstCamera(
+                    device_index=STIRFRY_LEFT_CAMERA_INDEX,
+                    width=1920,
+                    height=1536,
+                    fps=CAMERA_FPS
+                )
+                if self.stirfry_left_cap.start():
+                    print(f"[카메라] 볶음 왼쪽 카메라 초기화 완료 ✓")
+                else:
+                    print(f"[카메라] 볶음 왼쪽 카메라 초기화 실패 ✗")
+                    self.stirfry_left_cap = None
+            except Exception as e:
+                print(f"[카메라] 볶음 왼쪽 카메라 초기화 실패: {e}")
                 self.stirfry_left_cap = None
-        except Exception as e:
-            print(f"[오류] 볶음 왼쪽 카메라 초기화 실패: {e}")
-            self.stirfry_left_cap = None
+        else:
+            print(f"[카메라] 볶음 왼쪽 카메라 비활성화됨 (stirfry_left_enabled=false)")
 
         # Camera 3: Stir-fry monitoring RIGHT
-        try:
-            print(f"[카메라] 볶음 오른쪽 카메라 ({STIRFRY_RIGHT_CAMERA_TYPE.upper()} #{STIRFRY_RIGHT_CAMERA_INDEX}) 시작 중...")
-            self.stirfry_right_cap = GstCamera(
-                device_index=STIRFRY_RIGHT_CAMERA_INDEX,
-                width=1920,
-                height=1536,
-                fps=CAMERA_FPS
-            )
-            if self.stirfry_right_cap.start():
-                print(f"[카메라] 볶음 오른쪽 카메라 초기화 완료 ✓")
-            else:
-                print(f"[오류] 볶음 오른쪽 카메라 초기화 실패")
+        if STIRFRY_RIGHT_ENABLED:
+            try:
+                print(f"[카메라] 볶음 오른쪽 카메라 ({STIRFRY_RIGHT_CAMERA_TYPE.upper()} #{STIRFRY_RIGHT_CAMERA_INDEX}) 시작 중...")
+                self.stirfry_right_cap = GstCamera(
+                    device_index=STIRFRY_RIGHT_CAMERA_INDEX,
+                    width=1920,
+                    height=1536,
+                    fps=CAMERA_FPS
+                )
+                if self.stirfry_right_cap.start():
+                    print(f"[카메라] 볶음 오른쪽 카메라 초기화 완료 ✓")
+                else:
+                    print(f"[카메라] 볶음 오른쪽 카메라 초기화 실패 ✗")
+                    self.stirfry_right_cap = None
+            except Exception as e:
+                print(f"[카메라] 볶음 오른쪽 카메라 초기화 실패: {e}")
                 self.stirfry_right_cap = None
-        except Exception as e:
-            print(f"[오류] 볶음 오른쪽 카메라 초기화 실패: {e}")
-            self.stirfry_right_cap = None
+        else:
+            print(f"[카메라] 볶음 오른쪽 카메라 비활성화됨 (stirfry_right_enabled=false)")
 
-        print("[카메라] 모든 카메라 초기화 완료!")
+        print("[카메라] 카메라 초기화 완료!")
 
     def init_yolo(self):
         """Initialize YOLO model with GPU acceleration"""

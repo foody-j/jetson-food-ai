@@ -71,13 +71,18 @@
   "_comment_ai_mode": "AI 장착 여부 (true=AI 완성됨, false=AI 미완성)",
   "ai_mode_enabled": false,
 
+  "_comment_camera_person_enabled": "사람 감지 카메라 사용 여부 (true=사용, false=미사용)",
+  "camera_person_enabled": true,
+
   "_comment_stirfry_left": "볶음 모니터링 왼쪽 카메라",
+  "stirfry_left_enabled": true,
   "stirfry_left_camera_type": "gmsl",
   "stirfry_left_camera_index": 0,
   "stirfry_left_gmsl_mode": 2,
   "stirfry_left_gmsl_resolution_mode": 1,
 
   "_comment_stirfry_right": "볶음 모니터링 오른쪽 카메라",
+  "stirfry_right_enabled": true,
   "stirfry_right_camera_type": "gmsl",
   "stirfry_right_camera_index": 1,
   "stirfry_right_gmsl_mode": 2,

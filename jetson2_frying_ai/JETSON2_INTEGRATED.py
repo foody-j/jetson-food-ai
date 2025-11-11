@@ -71,12 +71,14 @@ def get_ip_address():
 config = load_config()
 
 # Frying AI Configuration (video0, video1)
+FRYING_ENABLED = config.get('frying_enabled', True)
 FRYING_LEFT_CAMERA_INDEX = config.get('frying_left_camera_index', 0)
 FRYING_RIGHT_CAMERA_INDEX = config.get('frying_right_camera_index', 1)
 FRYING_SEG_MODEL = config.get('frying_seg_model', 'frying_seg.pt')
 FRYING_CLS_MODEL = config.get('frying_cls_model', 'frying_cls.pt')
 
 # Observe_add Configuration (video2, video3)
+OBSERVE_ENABLED = config.get('observe_enabled', True)
 OBSERVE_LEFT_CAMERA_INDEX = config.get('observe_left_camera_index', 2)
 OBSERVE_RIGHT_CAMERA_INDEX = config.get('observe_right_camera_index', 3)
 OBSERVE_SEG_MODEL = config.get('observe_seg_model', '../observe_add/besta.pt')
@@ -870,48 +872,74 @@ class JetsonIntegratedApp:
         self.btn_exit.pack(side=tk.RIGHT, padx=5)
 
     def init_cameras(self):
-        """Initialize all 4 GMSL cameras"""
+        """Initialize GMSL cameras based on enabled settings"""
         print("[카메라] 카메라 초기화 중...")
 
-        # Frying AI cameras (video0, video1)
-        self.frying_left_cap = GstCamera(
-            device_index=FRYING_LEFT_CAMERA_INDEX,
-            width=CAMERA_WIDTH,
-            height=CAMERA_HEIGHT,
-            fps=CAMERA_FPS
-        )
-        if self.frying_left_cap.start():
-            print(f"[카메라] 볶음 왼쪽 (video{FRYING_LEFT_CAMERA_INDEX}) 초기화 완료 ✓")
+        # Initialize cameras to None first
+        self.frying_left_cap = None
+        self.frying_right_cap = None
+        self.observe_left_cap = None
+        self.observe_right_cap = None
 
-        self.frying_right_cap = GstCamera(
-            device_index=FRYING_RIGHT_CAMERA_INDEX,
-            width=CAMERA_WIDTH,
-            height=CAMERA_HEIGHT,
-            fps=CAMERA_FPS
-        )
-        if self.frying_right_cap.start():
-            print(f"[카메라] 볶음 오른쪽 (video{FRYING_RIGHT_CAMERA_INDEX}) 초기화 완료 ✓")
+        # Frying AI cameras (video0, video1)
+        if FRYING_ENABLED:
+            print(f"[카메라] 튀김솥 카메라 초기화 중...")
+            self.frying_left_cap = GstCamera(
+                device_index=FRYING_LEFT_CAMERA_INDEX,
+                width=CAMERA_WIDTH,
+                height=CAMERA_HEIGHT,
+                fps=CAMERA_FPS
+            )
+            if self.frying_left_cap.start():
+                print(f"[카메라] 튀김솥 왼쪽 (video{FRYING_LEFT_CAMERA_INDEX}) 초기화 완료 ✓")
+            else:
+                print(f"[카메라] 튀김솥 왼쪽 (video{FRYING_LEFT_CAMERA_INDEX}) 초기화 실패 ✗")
+                self.frying_left_cap = None
+
+            self.frying_right_cap = GstCamera(
+                device_index=FRYING_RIGHT_CAMERA_INDEX,
+                width=CAMERA_WIDTH,
+                height=CAMERA_HEIGHT,
+                fps=CAMERA_FPS
+            )
+            if self.frying_right_cap.start():
+                print(f"[카메라] 튀김솥 오른쪽 (video{FRYING_RIGHT_CAMERA_INDEX}) 초기화 완료 ✓")
+            else:
+                print(f"[카메라] 튀김솥 오른쪽 (video{FRYING_RIGHT_CAMERA_INDEX}) 초기화 실패 ✗")
+                self.frying_right_cap = None
+        else:
+            print(f"[카메라] 튀김솥 카메라 비활성화됨 (frying_enabled=false)")
 
         # Observe_add cameras (video2, video3)
-        self.observe_left_cap = GstCamera(
-            device_index=OBSERVE_LEFT_CAMERA_INDEX,
-            width=CAMERA_WIDTH,
-            height=CAMERA_HEIGHT,
-            fps=CAMERA_FPS
-        )
-        if self.observe_left_cap.start():
-            print(f"[카메라] 바켓 왼쪽 (video{OBSERVE_LEFT_CAMERA_INDEX}) 초기화 완료 ✓")
+        if OBSERVE_ENABLED:
+            print(f"[카메라] 바스켓 카메라 초기화 중...")
+            self.observe_left_cap = GstCamera(
+                device_index=OBSERVE_LEFT_CAMERA_INDEX,
+                width=CAMERA_WIDTH,
+                height=CAMERA_HEIGHT,
+                fps=CAMERA_FPS
+            )
+            if self.observe_left_cap.start():
+                print(f"[카메라] 바스켓 왼쪽 (video{OBSERVE_LEFT_CAMERA_INDEX}) 초기화 완료 ✓")
+            else:
+                print(f"[카메라] 바스켓 왼쪽 (video{OBSERVE_LEFT_CAMERA_INDEX}) 초기화 실패 ✗")
+                self.observe_left_cap = None
 
-        self.observe_right_cap = GstCamera(
-            device_index=OBSERVE_RIGHT_CAMERA_INDEX,
-            width=CAMERA_WIDTH,
-            height=CAMERA_HEIGHT,
-            fps=CAMERA_FPS
-        )
-        if self.observe_right_cap.start():
-            print(f"[카메라] 바켓 오른쪽 (video{OBSERVE_RIGHT_CAMERA_INDEX}) 초기화 완료 ✓")
+            self.observe_right_cap = GstCamera(
+                device_index=OBSERVE_RIGHT_CAMERA_INDEX,
+                width=CAMERA_WIDTH,
+                height=CAMERA_HEIGHT,
+                fps=CAMERA_FPS
+            )
+            if self.observe_right_cap.start():
+                print(f"[카메라] 바스켓 오른쪽 (video{OBSERVE_RIGHT_CAMERA_INDEX}) 초기화 완료 ✓")
+            else:
+                print(f"[카메라] 바스켓 오른쪽 (video{OBSERVE_RIGHT_CAMERA_INDEX}) 초기화 실패 ✗")
+                self.observe_right_cap = None
+        else:
+            print(f"[카메라] 바스켓 카메라 비활성화됨 (observe_enabled=false)")
 
-        print("[카메라] 모든 카메라 초기화 완료!")
+        print("[카메라] 카메라 초기화 완료!")
 
     def update_clock(self):
         """Update time and date in header"""
@@ -927,6 +955,9 @@ class JetsonIntegratedApp:
     def update_frying_left(self):
         """Update Frying AI left camera - OPTIMIZED with frame skip"""
         if not self.running:
+            return
+
+        if self.frying_left_cap is None:
             return
 
         ret, frame = self.frying_left_cap.read()
@@ -1012,6 +1043,9 @@ class JetsonIntegratedApp:
     def update_frying_right(self):
         """Update Frying AI right camera - OPTIMIZED with frame skip"""
         if not self.running:
+            return
+
+        if self.frying_right_cap is None:
             return
 
         ret, frame = self.frying_right_cap.read()
@@ -1107,6 +1141,9 @@ class JetsonIntegratedApp:
     def update_observe_left(self):
         """Update Observe_add left camera - OPTIMIZED with GPU + frame skip"""
         if not self.running:
+            return
+
+        if self.observe_left_cap is None:
             return
 
         ret, frame = self.observe_left_cap.read()
@@ -1232,6 +1269,9 @@ class JetsonIntegratedApp:
     def update_observe_right(self):
         """Update Observe_add right camera - OPTIMIZED with GPU + frame skip"""
         if not self.running:
+            return
+
+        if self.observe_right_cap is None:
             return
 
         ret, frame = self.observe_right_cap.read()
