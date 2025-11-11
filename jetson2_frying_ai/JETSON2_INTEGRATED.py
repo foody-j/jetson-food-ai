@@ -25,6 +25,7 @@ import sys
 import numpy as np
 from collections import deque
 from queue import Queue
+import socket
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -56,6 +57,17 @@ def load_config(config_path="config_jetson2.json"):
     with open(config_full_path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+def get_ip_address():
+    """Get local IP address"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "unknown"
+
 config = load_config()
 
 # Frying AI Configuration (video0, video1)
@@ -77,21 +89,36 @@ CONF_SEG = config.get('conf_seg', 0.5)
 VOTE_N = config.get('vote_n', 7)  # Majority voting window
 POSITIVE_LABEL = config.get('positive_label', 'filled')
 
+# Device Identification
+DEVICE_ID = config.get('device_id', 'jetson2')
+DEVICE_NAME = config.get('device_name', 'Jetson2_Frying_Station')
+DEVICE_LOCATION = config.get('device_location', 'kitchen_frying')
+
 # MQTT Configuration
 MQTT_ENABLED = config.get('mqtt_enabled', False)
 MQTT_BROKER = config.get('mqtt_broker', 'localhost')
 MQTT_PORT = config.get('mqtt_port', 1883)
-MQTT_TOPIC_FRYING = config.get('mqtt_topic_frying', 'frying/status')
-MQTT_TOPIC_OBSERVE = config.get('mqtt_topic_observe', 'observe/status')
+# MQTT Topics (published by Jetson)
+MQTT_TOPIC_FRYING = f"{DEVICE_ID}/" + config.get('mqtt_topic_frying', 'frying/status')
+MQTT_TOPIC_OBSERVE = f"{DEVICE_ID}/" + config.get('mqtt_topic_observe', 'observe/status')
+MQTT_TOPIC_SYSTEM_AI_MODE = config.get('mqtt_topic_ai_mode', f"{DEVICE_ID}/system/ai_mode")
+MQTT_TOPIC_FRYING_COMPLETION = f"{DEVICE_ID}/frying/completion"
+# Subscribed topics (no prefix - shared from robot)
 MQTT_TOPIC_OIL_TEMP_LEFT = config.get('mqtt_topic_oil_temp_left', 'frying/oil_temp/left')
 MQTT_TOPIC_OIL_TEMP_RIGHT = config.get('mqtt_topic_oil_temp_right', 'frying/oil_temp/right')
 MQTT_TOPIC_PROBE_TEMP_LEFT = config.get('mqtt_topic_probe_temp_left', 'frying/probe_temp/left')
 MQTT_TOPIC_PROBE_TEMP_RIGHT = config.get('mqtt_topic_probe_temp_right', 'frying/probe_temp/right')
 MQTT_TOPIC_FOOD_TYPE = config.get('mqtt_topic_food_type', 'frying/food_type')
+MQTT_TOPIC_FRYING_CONTROL = config.get('mqtt_topic_frying_control', 'frying/control')
 MQTT_QOS = config.get('mqtt_qos', 1)
 MQTT_CLIENT_ID = config.get('mqtt_client_id', 'jetson2_ai')
+# AI Mode Setting
+AI_MODE_ENABLED = config.get('ai_mode_enabled', False)
 
 # Data Collection Configuration
+SAVE_RESOLUTION = config.get('save_resolution', {'width': 1280, 'height': 720})
+SAVE_WIDTH = SAVE_RESOLUTION['width']
+SAVE_HEIGHT = SAVE_RESOLUTION['height']
 TARGET_PROBE_TEMP = config.get('target_probe_temp', 75.0)
 JPEG_QUALITY = config.get('jpeg_quality', 85)
 FOOD_TYPES = config.get('food_types', ["chicken", "shrimp", "potato", "dumpling", "pork_cutlet", "fish"])
@@ -308,7 +335,7 @@ class JetsonIntegratedApp:
         """Initialize MQTT client"""
         try:
             self.mqtt_client = MQTTClient(
-                broker_address=MQTT_BROKER,
+                broker=MQTT_BROKER,
                 port=MQTT_PORT,
                 client_id=MQTT_CLIENT_ID
             )
@@ -321,15 +348,27 @@ class JetsonIntegratedApp:
 
             # Subscribe to food type topic
             self.mqtt_client.subscribe(MQTT_TOPIC_FOOD_TYPE, self.on_food_type)
+            self.mqtt_client.subscribe(MQTT_TOPIC_FRYING_CONTROL, self.on_frying_control)
 
             self.mqtt_client.connect()
             print(f"[MQTT] 연결 성공: {MQTT_BROKER}:{MQTT_PORT}")
-            print(f"[MQTT] 구독 토픽:")
+            print(f"[MQTT] Device: {DEVICE_ID} ({DEVICE_NAME}) @ {get_ip_address()}")
+            print(f"[MQTT] 구독 토픽 (로봇→Jetson):")
             print(f"  - {MQTT_TOPIC_OIL_TEMP_LEFT}")
             print(f"  - {MQTT_TOPIC_OIL_TEMP_RIGHT}")
             print(f"  - {MQTT_TOPIC_PROBE_TEMP_LEFT}")
             print(f"  - {MQTT_TOPIC_PROBE_TEMP_RIGHT}")
             print(f"  - {MQTT_TOPIC_FOOD_TYPE}")
+            print(f"[MQTT] 발행 토픽 (Jetson→로봇):")
+            print(f"  - {MQTT_TOPIC_OBSERVE}")
+            print(f"  - {MQTT_TOPIC_FRYING}")
+            print(f"  - {MQTT_TOPIC_SYSTEM_AI_MODE}")
+            print(f"  - {MQTT_TOPIC_FRYING_COMPLETION}")
+
+            # Publish AI mode status from config
+            ai_mode_status = "ON" if AI_MODE_ENABLED else "OFF"
+            self.send_mqtt_message(MQTT_TOPIC_SYSTEM_AI_MODE, ai_mode_status)
+            print(f"[MQTT] AI 모드 발행: {ai_mode_status} (config: ai_mode_enabled={AI_MODE_ENABLED})")
         except Exception as e:
             print(f"[MQTT] 연결 실패: {e}")
             self.mqtt_client = None
@@ -415,34 +454,68 @@ class JetsonIntegratedApp:
             pass
 
     def on_food_type(self, client, userdata, message):
-        """MQTT callback for food type"""
+        """MQTT callback for food type - AUTO START collection"""
         try:
             self.current_food_type = message.payload.decode()
-            print(f"[MQTT] 음식 종류 변경: {self.current_food_type}")
+            print(f"[MQTT] 음식 종류 수신: {self.current_food_type}")
 
-            # Store metadata during data collection
-            if self.data_collection_active:
+            # AUTO START: If not collecting, start automatically
+            if not self.data_collection_active:
+                print(f"[MQTT] 자동 수집 시작 - 음식: {self.current_food_type}")
+                self.root.after(0, self.start_data_collection)
+            else:
+                # If already collecting, store as metadata event
                 from datetime import datetime
                 self.collection_metadata.append({
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                     "type": "food_type_change",
                     "value": self.current_food_type
                 })
-        except:
-            pass
+                print(f"[MQTT] 수집 중 음식 종류 변경: {self.current_food_type}")
+        except Exception as e:
+            print(f"[MQTT] 음식 종류 수신 오류: {e}")
 
-    def send_mqtt_message(self, topic, message):
-        """Send MQTT message"""
+    def on_frying_control(self, client, userdata, message):
+        """MQTT callback for frying control commands - AUTO STOP"""
+        try:
+            command = message.payload.decode().strip().lower()
+            print(f"[MQTT] 튀김 제어 명령 수신: {command}")
+
+            if command == "stop":
+                if self.data_collection_active:
+                    print(f"[MQTT] 자동 수집 중지")
+                    self.root.after(0, self.stop_data_collection)
+                else:
+                    print(f"[MQTT] 수집 중이 아님 - 무시")
+        except Exception as e:
+            print(f"[MQTT] 제어 명령 수신 오류: {e}")
+
+    def send_mqtt_message(self, topic, message, include_device_info=True):
+        """Send MQTT message with optional device info"""
         if self.mqtt_client and MQTT_ENABLED:
             try:
-                self.mqtt_client.publish(topic, message, qos=MQTT_QOS)
+                if include_device_info:
+                    # Create JSON message with device info
+                    msg_data = {
+                        "device_id": DEVICE_ID,
+                        "device_name": DEVICE_NAME,
+                        "device_location": DEVICE_LOCATION,
+                        "ip_address": get_ip_address(),
+                        "message": message,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    payload = json.dumps(msg_data, ensure_ascii=False)
+                else:
+                    payload = message
+
+                self.mqtt_client.publish(topic, payload, qos=MQTT_QOS)
             except Exception as e:
                 print(f"[MQTT] 전송 실패: {e}")
 
     def build_gui(self):
         """Build the main GUI layout - WHITE MODE with Jetson #1 header"""
-        # Top header - matching Jetson #1
-        header_height = 110
+        # Top header - matching Jetson #1 (세로 모드 최적화 - 높이 축소)
+        header_height = 80
         header_frame = tk.Frame(self.root, bg=COLOR_PANEL, height=header_height, bd=1, relief=tk.FLAT)
         header_frame.pack(fill=tk.X, padx=0, pady=0)
         header_frame.pack_propagate(False)
@@ -452,56 +525,61 @@ class JetsonIntegratedApp:
         header_frame.columnconfigure(1, weight=1)  # Center: Title + Time
         header_frame.columnconfigure(2, weight=1)  # Right: Buttons
 
-        # LEFT: System status + Date
+        # LEFT: System status + Date (세로 모드 - 축소)
         left_frame = tk.Frame(header_frame, bg=COLOR_PANEL)
-        left_frame.grid(row=0, column=0, sticky="w", padx=8, pady=8)
+        left_frame.grid(row=0, column=0, sticky="w", padx=5, pady=3)
 
         self.system_status_label = tk.Label(left_frame, text="시스템 정상",
-                                           font=NORMAL_FONT, bg=COLOR_PANEL, fg=COLOR_OK)
+                                           font=("Noto Sans CJK KR", 12), bg=COLOR_PANEL, fg=COLOR_OK)
         self.system_status_label.pack(anchor="w")
 
         self.date_label = tk.Label(left_frame, text="----/--/--",
-                                   font=("Noto Sans CJK KR", 14),
+                                   font=("Noto Sans CJK KR", 11),
                                    bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT)
         self.date_label.pack(anchor="w")
 
-        # CENTER: Title + Time
+        # CENTER: Title + Time (세로 모드 - 축소)
         center_frame = tk.Frame(header_frame, bg=COLOR_PANEL)
-        center_frame.grid(row=0, column=1, sticky="n", pady=5)
+        center_frame.grid(row=0, column=1, sticky="n", pady=3)
 
         tk.Label(center_frame, text="현대자동차 울산점",
-                font=("Noto Sans CJK KR", 20, "bold"),
+                font=("Noto Sans CJK KR", 16, "bold"),
                 bg=COLOR_PANEL, fg=COLOR_ACCENT).pack()
 
         self.time_label = tk.Label(center_frame, text="--:--:--",
-                                   font=("Noto Sans CJK KR", 20, "bold"),
+                                   font=("Noto Sans CJK KR", 16, "bold"),
                                    bg=COLOR_PANEL, fg=COLOR_INFO)
         self.time_label.pack()
 
-        # RIGHT: PC Status, Vibration Check, Settings buttons
+        # Keyboard shortcuts hint (세로 모드 - 폰트 축소)
+        tk.Label(center_frame, text="F11: 전체화면 | ESC: 창모드",
+                font=("Noto Sans CJK KR", 8),
+                bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT).pack(pady=(1,0))
+
+        # RIGHT: PC Status, Vibration Check, Settings buttons (세로 모드 - 축소)
         right_frame = tk.Frame(header_frame, bg=COLOR_PANEL)
-        right_frame.grid(row=0, column=2, sticky="e", padx=8, pady=8)
+        right_frame.grid(row=0, column=2, sticky="e", padx=5, pady=3)
 
         # PC Status button
         tk.Button(right_frame, text="PC 상태",
-                 font=("Noto Sans CJK KR", 16, "bold"),
+                 font=("Noto Sans CJK KR", 12, "bold"),
                  command=self.open_pc_status, bg="#00897B", fg="white",
                  relief=tk.FLAT, bd=0, activebackground="#00796B",
-                 padx=12, pady=8).pack(side=tk.LEFT, padx=3)
+                 padx=8, pady=5).pack(side=tk.LEFT, padx=2)
 
         # Vibration check button
         tk.Button(right_frame, text="진동 체크",
-                 font=("Noto Sans CJK KR", 16, "bold"),
+                 font=("Noto Sans CJK KR", 12, "bold"),
                  command=self.open_vibration_check, bg=COLOR_INFO, fg="white",
                  relief=tk.FLAT, bd=0, activebackground=COLOR_BUTTON_HOVER,
-                 padx=12, pady=8).pack(side=tk.LEFT, padx=3)
+                 padx=8, pady=5).pack(side=tk.LEFT, padx=2)
 
         # Settings button (placeholder)
         tk.Button(right_frame, text="설정",
-                 font=("Noto Sans CJK KR", 16, "bold"),
+                 font=("Noto Sans CJK KR", 12, "bold"),
                  command=self.open_settings, bg=COLOR_BUTTON, fg="white",
                  relief=tk.FLAT, bd=0, activebackground=COLOR_BUTTON_HOVER,
-                 padx=12, pady=8).pack(side=tk.LEFT, padx=3)
+                 padx=8, pady=5).pack(side=tk.LEFT, padx=2)
 
         # Main content frame (세로 레이아웃 - 768x1024 최적화)
         self.content_frame = tk.Frame(self.root, bg=COLOR_BG)
@@ -527,107 +605,107 @@ class JetsonIntegratedApp:
         """Create Frying AI Left camera panel (세로 레이아웃)"""
         panel = tk.Frame(self.content_frame, bg=COLOR_PANEL, relief=tk.RAISED, borderwidth=1,
                         highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
-        panel.grid(row=0, column=0, padx=3, pady=2, sticky="nsew")
+        panel.grid(row=0, column=0, padx=2, pady=1, sticky="nsew")
 
-        # Title
-        title = tk.Label(panel, text="🍤 튀김 AI - 왼쪽", font=MEDIUM_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
-        title.pack(pady=5)
+        # Title (축소)
+        title = tk.Label(panel, text="🍤 튀김 AI - 왼쪽", font=("Noto Sans CJK KR", 12, "bold"), bg=COLOR_PANEL, fg=COLOR_TEXT)
+        title.pack(pady=2)
 
-        # Camera preview (세로 레이아웃 - 높이 축소)
-        preview_container = tk.Frame(panel, bg="black", height=160)
-        preview_container.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
+        # Camera preview (세로 레이아웃 - 높이 더 축소)
+        preview_container = tk.Frame(panel, bg="black", height=125)
+        preview_container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         preview_container.pack_propagate(False)
 
         self.frying_left_label = tk.Label(preview_container, bg="black")
         self.frying_left_label.pack(expand=True)
 
-        # Info frame (temperature + color features)
+        # Info frame (temperature + color features) - 축소
         info_frame = tk.Frame(panel, bg=COLOR_PANEL)
-        info_frame.pack(pady=5)
+        info_frame.pack(pady=1)
 
         # Oil Temperature
         self.frying_left_temp_label = tk.Label(
-            info_frame, text="기름: -- °C", font=SMALL_FONT, bg=COLOR_PANEL, fg=COLOR_ERROR
+            info_frame, text="기름: -- °C", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_ERROR
         )
         self.frying_left_temp_label.pack()
 
         # Probe Temperature
         self.frying_left_probe_label = tk.Label(
-            info_frame, text="탐침: -- °C", font=SMALL_FONT, bg=COLOR_PANEL, fg=COLOR_INFO
+            info_frame, text="탐침: -- °C", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_INFO
         )
         self.frying_left_probe_label.pack()
 
         # Color features
         self.frying_left_color_label = tk.Label(
-            info_frame, text="갈색: --% | 황금: --%", font=SMALL_FONT, bg=COLOR_PANEL, fg=COLOR_WARNING
+            info_frame, text="갈색: --% | 황금: --%", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_WARNING
         )
         self.frying_left_color_label.pack()
 
         # Status
         self.frying_left_status = tk.Label(
-            panel, text="대기 중", font=SMALL_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT
+            panel, text="대기 중", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT
         )
-        self.frying_left_status.pack(pady=2)
+        self.frying_left_status.pack(pady=1)
 
     def create_frying_right_panel(self):
         """Create Frying AI Right camera panel (세로 레이아웃)"""
         panel = tk.Frame(self.content_frame, bg=COLOR_PANEL, relief=tk.RAISED, borderwidth=1,
                         highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
-        panel.grid(row=1, column=0, padx=3, pady=2, sticky="nsew")
+        panel.grid(row=1, column=0, padx=2, pady=1, sticky="nsew")
 
-        # Title
-        title = tk.Label(panel, text="🍤 튀김 AI - 오른쪽", font=MEDIUM_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
-        title.pack(pady=5)
+        # Title (축소)
+        title = tk.Label(panel, text="🍤 튀김 AI - 오른쪽", font=("Noto Sans CJK KR", 12, "bold"), bg=COLOR_PANEL, fg=COLOR_TEXT)
+        title.pack(pady=2)
 
-        # Camera preview (세로 레이아웃 - 높이 축소)
-        preview_container = tk.Frame(panel, bg="black", height=160)
-        preview_container.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
+        # Camera preview (세로 레이아웃 - 높이 더 축소)
+        preview_container = tk.Frame(panel, bg="black", height=125)
+        preview_container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         preview_container.pack_propagate(False)
 
         self.frying_right_label = tk.Label(preview_container, bg="black")
         self.frying_right_label.pack(expand=True)
 
-        # Info frame (temperature + color features)
+        # Info frame (temperature + color features) - 축소
         info_frame = tk.Frame(panel, bg=COLOR_PANEL)
-        info_frame.pack(pady=5)
+        info_frame.pack(pady=1)
 
         # Oil Temperature
         self.frying_right_temp_label = tk.Label(
-            info_frame, text="기름: -- °C", font=SMALL_FONT, bg=COLOR_PANEL, fg=COLOR_ERROR
+            info_frame, text="기름: -- °C", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_ERROR
         )
         self.frying_right_temp_label.pack()
 
         # Probe Temperature
         self.frying_right_probe_label = tk.Label(
-            info_frame, text="탐침: -- °C", font=SMALL_FONT, bg=COLOR_PANEL, fg=COLOR_INFO
+            info_frame, text="탐침: -- °C", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_INFO
         )
         self.frying_right_probe_label.pack()
 
         # Color features
         self.frying_right_color_label = tk.Label(
-            info_frame, text="갈색: --% | 황금: --%", font=SMALL_FONT, bg=COLOR_PANEL, fg=COLOR_WARNING
+            info_frame, text="갈색: --% | 황금: --%", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_WARNING
         )
         self.frying_right_color_label.pack()
 
         # Status
         self.frying_right_status = tk.Label(
-            panel, text="대기 중", font=SMALL_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT
+            panel, text="대기 중", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT
         )
-        self.frying_right_status.pack(pady=2)
+        self.frying_right_status.pack(pady=1)
 
     def create_observe_left_panel(self):
         """Create Observe_add Left camera panel (세로 레이아웃)"""
         panel = tk.Frame(self.content_frame, bg=COLOR_PANEL, relief=tk.RAISED, borderwidth=1,
                         highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
-        panel.grid(row=2, column=0, padx=3, pady=2, sticky="nsew")
+        panel.grid(row=2, column=0, padx=2, pady=1, sticky="nsew")
 
-        # Title
-        title = tk.Label(panel, text="🥘 바켓 감지 - 왼쪽", font=MEDIUM_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
-        title.pack(pady=5)
+        # Title (축소)
+        title = tk.Label(panel, text="🥘 바켓 감지 - 왼쪽", font=("Noto Sans CJK KR", 12, "bold"), bg=COLOR_PANEL, fg=COLOR_TEXT)
+        title.pack(pady=2)
 
-        # Camera preview (세로 레이아웃 - 높이 축소)
-        preview_container = tk.Frame(panel, bg="black", height=160)
-        preview_container.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
+        # Camera preview (세로 레이아웃 - 높이 더 축소)
+        preview_container = tk.Frame(panel, bg="black", height=125)
+        preview_container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         preview_container.pack_propagate(False)
 
         self.observe_left_label = tk.Label(preview_container, bg="black")
@@ -635,23 +713,23 @@ class JetsonIntegratedApp:
 
         # Status
         self.observe_left_status = tk.Label(
-            panel, text="대기 중", font=SMALL_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT
+            panel, text="대기 중", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT
         )
-        self.observe_left_status.pack(pady=5)
+        self.observe_left_status.pack(pady=2)
 
     def create_observe_right_panel(self):
         """Create Observe_add Right camera panel (세로 레이아웃)"""
         panel = tk.Frame(self.content_frame, bg=COLOR_PANEL, relief=tk.RAISED, borderwidth=1,
                         highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
-        panel.grid(row=3, column=0, padx=3, pady=2, sticky="nsew")
+        panel.grid(row=3, column=0, padx=2, pady=1, sticky="nsew")
 
-        # Title
-        title = tk.Label(panel, text="🥘 바켓 감지 - 오른쪽", font=MEDIUM_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
-        title.pack(pady=5)
+        # Title (축소)
+        title = tk.Label(panel, text="🥘 바켓 감지 - 오른쪽", font=("Noto Sans CJK KR", 12, "bold"), bg=COLOR_PANEL, fg=COLOR_TEXT)
+        title.pack(pady=2)
 
-        # Camera preview (세로 레이아웃 - 높이 축소)
-        preview_container = tk.Frame(panel, bg="black", height=160)
-        preview_container.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
+        # Camera preview (세로 레이아웃 - 높이 더 축소)
+        preview_container = tk.Frame(panel, bg="black", height=125)
+        preview_container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         preview_container.pack_propagate(False)
 
         self.observe_right_label = tk.Label(preview_container, bg="black")
@@ -659,137 +737,137 @@ class JetsonIntegratedApp:
 
         # Status
         self.observe_right_status = tk.Label(
-            panel, text="대기 중", font=SMALL_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT
+            panel, text="대기 중", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT
         )
-        self.observe_right_status.pack(pady=5)
+        self.observe_right_status.pack(pady=2)
 
     def create_control_panel(self):
         """Create bottom control panel (세로 레이아웃 최적화)"""
         control_frame = tk.Frame(self.root, bg=COLOR_BG)
-        control_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
+        control_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=3, pady=3)
 
-        # Start/Stop buttons
+        # Start/Stop buttons (세로 모드 - 버튼 크기 축소)
         btn_frame = tk.Frame(control_frame, bg=COLOR_BG)
-        btn_frame.pack(side=tk.LEFT, padx=10)
+        btn_frame.pack(side=tk.LEFT, padx=5)
 
         self.btn_start_frying = tk.Button(
             btn_frame,
-            text="튀김 AI 시작",
-            font=BUTTON_FONT,
+            text="튀김 시작",
+            font=("Noto Sans CJK KR", 11),
             bg="#27AE60",
             fg="white",
             activebackground="#229954",
             command=self.start_frying_ai,
-            width=10,
+            width=8,
             height=1,
             relief=tk.FLAT
         )
-        self.btn_start_frying.pack(side=tk.LEFT, padx=5)
+        self.btn_start_frying.pack(side=tk.LEFT, padx=2)
 
         self.btn_stop_frying = tk.Button(
             btn_frame,
-            text="튀김 AI 중지",
-            font=BUTTON_FONT,
+            text="튀김 중지",
+            font=("Noto Sans CJK KR", 11),
             bg=COLOR_ERROR,
             fg="white",
             activebackground="#C0392B",
             command=self.stop_frying_ai,
-            width=10,
+            width=8,
             height=1,
             state=tk.DISABLED,
             relief=tk.FLAT
         )
-        self.btn_stop_frying.pack(side=tk.LEFT, padx=5)
+        self.btn_stop_frying.pack(side=tk.LEFT, padx=2)
 
         self.btn_start_observe = tk.Button(
             btn_frame,
-            text="바켓 감지 시작",
-            font=BUTTON_FONT,
+            text="바켓 시작",
+            font=("Noto Sans CJK KR", 11),
             bg="#3498DB",
             fg="white",
             activebackground="#2980B9",
             command=self.start_observe_ai,
-            width=10,
+            width=8,
             height=1,
             relief=tk.FLAT
         )
-        self.btn_start_observe.pack(side=tk.LEFT, padx=5)
+        self.btn_start_observe.pack(side=tk.LEFT, padx=2)
 
         self.btn_stop_observe = tk.Button(
             btn_frame,
-            text="바켓 감지 중지",
-            font=BUTTON_FONT,
+            text="바켓 중지",
+            font=("Noto Sans CJK KR", 11),
             bg=COLOR_ERROR,
             fg="white",
             activebackground="#C0392B",
             command=self.stop_observe_ai,
-            width=10,
+            width=8,
             height=1,
             state=tk.DISABLED,
             relief=tk.FLAT
         )
-        self.btn_stop_observe.pack(side=tk.LEFT, padx=5)
+        self.btn_stop_observe.pack(side=tk.LEFT, padx=2)
 
-        # Data collection buttons
+        # Data collection buttons (세로 모드 - 버튼 크기 축소)
         separator = tk.Frame(btn_frame, width=2, bg="#BDC3C7")
-        separator.pack(side=tk.LEFT, fill=tk.Y, padx=15, pady=5)
+        separator.pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=3)
 
         self.btn_start_collection = tk.Button(
             btn_frame,
-            text="📊 수집 시작",
-            font=BUTTON_FONT,
+            text="수집 시작",
+            font=("Noto Sans CJK KR", 11),
             bg="#9B59B6",
             fg="white",
             activebackground="#8E44AD",
             command=self.start_data_collection,
-            width=10,
+            width=8,
             height=1,
             relief=tk.FLAT
         )
-        self.btn_start_collection.pack(side=tk.LEFT, padx=5)
+        self.btn_start_collection.pack(side=tk.LEFT, padx=2)
 
         self.btn_stop_collection = tk.Button(
             btn_frame,
-            text="📊 수집 중지",
-            font=BUTTON_FONT,
+            text="수집 중지",
+            font=("Noto Sans CJK KR", 11),
             bg=COLOR_ERROR,
             fg="white",
             activebackground="#C0392B",
             command=self.stop_data_collection,
-            width=10,
+            width=8,
             height=1,
             state=tk.DISABLED,
             relief=tk.FLAT
         )
-        self.btn_stop_collection.pack(side=tk.LEFT, padx=5)
+        self.btn_stop_collection.pack(side=tk.LEFT, padx=2)
 
-        # Collection status label
+        # Collection status label (세로 모드 - 폰트 축소)
         status_frame = tk.Frame(control_frame, bg=COLOR_BG)
-        status_frame.pack(side=tk.LEFT, padx=20)
+        status_frame.pack(side=tk.LEFT, padx=10)
 
         self.collection_status_label = tk.Label(
             status_frame,
             text="수집: 대기 중",
-            font=NORMAL_FONT,
+            font=("Noto Sans CJK KR", 10),
             bg=COLOR_BG,
             fg=COLOR_TEXT
         )
         self.collection_status_label.pack()
 
-        # Exit button
+        # Exit button (세로 모드 - 버튼 크기 축소)
         self.btn_exit = tk.Button(
             control_frame,
             text="종료",
-            font=BUTTON_FONT,
+            font=("Noto Sans CJK KR", 11),
             bg="#95A5A6",
             fg="white",
             activebackground="#7F8C8D",
             command=self.on_close,
-            width=8,
+            width=6,
             height=1,
             relief=tk.FLAT
         )
-        self.btn_exit.pack(side=tk.RIGHT, padx=10)
+        self.btn_exit.pack(side=tk.RIGHT, padx=5)
 
     def init_cameras(self):
         """Initialize all 4 GMSL cameras"""
@@ -1408,16 +1486,17 @@ class JetsonIntegratedApp:
         import subprocess
         import os
 
-        vibration_script = "/home/dkuyj/jetson-camera-monitor/vibration_sensor_simple.py"
-        vibration_dir = "/home/dkuyj/jetson-camera-monitor"
+        # 상대 경로로 수정 (jetson-food-ai 기준)
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        vibration_script = os.path.join(base_dir, "vibration_sensor_simple.py")
 
         if not os.path.exists(vibration_script):
             print(f"[진동] 오류: {vibration_script} 파일이 없습니다")
             return
 
         try:
-            # 진동 센서 프로그램을 별도 프로세스로 실행 (작업 디렉토리 지정)
-            proc = subprocess.Popen(["python3", vibration_script], cwd=vibration_dir)
+            # 진동 센서 프로그램을 별도 프로세스로 실행
+            proc = subprocess.Popen(["python3", vibration_script], cwd=base_dir)
             self.child_processes.append(proc)
             print("[진동] 진동 센서 프로그램 실행")
         except Exception as e:
@@ -1660,22 +1739,26 @@ class JetsonIntegratedApp:
         # Save frying cameras (camera 0, 1)
         for cam_idx, frame in [(0, frying_left), (1, frying_right)]:
             if frame is not None:
+                # Resize to save resolution (1920x1536 -> 1280x720)
+                frame_resized = cv2.resize(frame, (SAVE_WIDTH, SAVE_HEIGHT), interpolation=cv2.INTER_LINEAR)
                 save_path = os.path.join(
                     self.frying_session_dir,
                     f"camera_{cam_idx}",
                     f"cam{cam_idx}_{timestamp}.jpg"
                 )
-                cv2.imwrite(save_path, frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                cv2.imwrite(save_path, frame_resized, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
 
         # Save bucket cameras (camera 2, 3)
         for cam_idx, frame in [(2, observe_left), (3, observe_right)]:
             if frame is not None:
+                # Resize to save resolution (1920x1536 -> 1280x720)
+                frame_resized = cv2.resize(frame, (SAVE_WIDTH, SAVE_HEIGHT), interpolation=cv2.INTER_LINEAR)
                 save_path = os.path.join(
                     self.bucket_session_dir,
                     f"camera_{cam_idx}",
                     f"cam{cam_idx}_{timestamp}.jpg"
                 )
-                cv2.imwrite(save_path, frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                cv2.imwrite(save_path, frame_resized, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
 
         self.collection_frame_counter += 1
 
@@ -1727,27 +1810,44 @@ class JetsonIntegratedApp:
                         except Exception as e:
                             print(f"[종료] 자식 프로세스 종료 오류: {e}")
 
-                    # Stop cameras
+                    # Stop cameras with timeout
+                    print("[종료] 카메라 해제 중...")
+                    import threading
+
+                    def stop_camera_safe(cap, name):
+                        try:
+                            cap.stop()
+                            print(f"[종료] {name} 해제 완료")
+                        except Exception as e:
+                            print(f"[종료] {name} 해제 오류: {e}")
+
+                    threads = []
                     if self.frying_left_cap:
-                        try:
-                            self.frying_left_cap.stop()
-                        except:
-                            pass
+                        t = threading.Thread(target=stop_camera_safe, args=(self.frying_left_cap, "frying_left"))
+                        t.daemon = True
+                        t.start()
+                        threads.append(t)
                     if self.frying_right_cap:
-                        try:
-                            self.frying_right_cap.stop()
-                        except:
-                            pass
+                        t = threading.Thread(target=stop_camera_safe, args=(self.frying_right_cap, "frying_right"))
+                        t.daemon = True
+                        t.start()
+                        threads.append(t)
                     if self.observe_left_cap:
-                        try:
-                            self.observe_left_cap.stop()
-                        except:
-                            pass
+                        t = threading.Thread(target=stop_camera_safe, args=(self.observe_left_cap, "observe_left"))
+                        t.daemon = True
+                        t.start()
+                        threads.append(t)
                     if self.observe_right_cap:
-                        try:
-                            self.observe_right_cap.stop()
-                        except:
-                            pass
+                        t = threading.Thread(target=stop_camera_safe, args=(self.observe_right_cap, "observe_right"))
+                        t.daemon = True
+                        t.start()
+                        threads.append(t)
+
+                    # Wait for all threads with timeout
+                    for t in threads:
+                        t.join(timeout=2.0)
+
+                    print("[종료] 카메라 해제 완료")
 
                     # Disconnect MQTT
                     if self.mqtt_client:

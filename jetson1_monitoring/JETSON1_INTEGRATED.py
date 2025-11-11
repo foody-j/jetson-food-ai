@@ -21,6 +21,7 @@ import json
 import threading
 import sys
 import numpy as np
+import socket
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,6 +38,17 @@ def load_config(config_path="config.json"):
     """Load configuration from JSON file"""
     with open(config_path, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+def get_ip_address():
+    """Get local IP address"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "unknown"
 
 config = load_config()
 
@@ -65,13 +77,26 @@ MOTION_MIN_AREA = config['motion_min_area']
 SNAPSHOT_DIR = config['snapshot_dir']
 SAVE_COOLDOWN_SEC = config['snapshot_cooldown_sec']
 
+# Device Identification
+DEVICE_ID = config.get('device_id', 'jetson1')
+DEVICE_NAME = config.get('device_name', 'Jetson1_StirFry_Station')
+DEVICE_LOCATION = config.get('device_location', 'kitchen_stirfry')
+
 # MQTT Configuration
 MQTT_ENABLED = config.get('mqtt_enabled', False)
 MQTT_BROKER = config.get('mqtt_broker', 'localhost')
 MQTT_PORT = config.get('mqtt_port', 1883)
-MQTT_TOPIC = config.get('mqtt_topic', 'robot/control')
+# MQTT Topics (subscribed by Jetson)
+MQTT_TOPIC_STIRFRY_FOOD_TYPE = config.get('mqtt_topic_stirfry_food_type', 'stirfry/food_type')
+MQTT_TOPIC_STIRFRY_CONTROL = config.get('mqtt_topic_stirfry_control', 'stirfry/control')
+# MQTT Topics (published by Jetson)
+MQTT_TOPIC_SYSTEM_AI_MODE = config.get('mqtt_topic_ai_mode', f"{DEVICE_ID}/system/ai_mode")
+MQTT_TOPIC_STIRFRY_STATUS = f"{DEVICE_ID}/stirfry/status"
+MQTT_TOPIC = config.get('mqtt_topic', 'robot/control')  # Legacy topic (robot control)
 MQTT_QOS = config.get('mqtt_qos', 1)
 MQTT_CLIENT_ID = config.get('mqtt_client_id', 'robotcam_jetson')
+# AI Mode Setting
+AI_MODE_ENABLED = config.get('ai_mode_enabled', False)
 
 # Stir-fry monitoring configuration - TWO CAMERAS
 STIRFRY_LEFT_CAMERA_TYPE = config.get('stirfry_left_camera_type', 'usb')
@@ -196,6 +221,12 @@ class IntegratedMonitorApp:
         self.stirfry_left_frame_count = 0
         self.stirfry_right_frame_count = 0
         self.stirfry_frame_skip_counter = 0
+        # Food type from MQTT
+        self.current_stirfry_food_type = "unknown"
+        # Session management (Jetson2 style)
+        self.stirfry_session_id = None
+        self.stirfry_session_start_time = None
+        self.stirfry_metadata = []  # Store metadata during recording
         self.developer_mode = False
         self.snapshot_count = 0
         self.shutdown_tap_count = 0
@@ -296,11 +327,11 @@ class IntegratedMonitorApp:
 
     def create_gui(self):
         """Create the main GUI layout - AUTO-ADAPTIVE for any screen"""
-        # Calculate adaptive dimensions
-        header_height = int(140 * self.scale_factor)  # Taller for more info
-        padding = int(10 * self.scale_factor)
+        # Calculate adaptive dimensions (세로 모드 최적화 - 더 작게)
+        header_height = int(90 * self.scale_factor)  # 축소 (140 → 90)
+        padding = int(8 * self.scale_factor)
 
-        # Top header - Adaptive height with more info
+        # Top header - Adaptive height with more info (세로 모드 최적화)
         header_frame = tk.Frame(self.root, bg=COLOR_PANEL, height=header_height, bd=1, relief=tk.FLAT)
         header_frame.pack(fill=tk.X, padx=0, pady=0)
         header_frame.pack_propagate(False)
@@ -310,57 +341,57 @@ class IntegratedMonitorApp:
         header_frame.columnconfigure(1, weight=1)  # Center: Title + Time
         header_frame.columnconfigure(2, weight=1)  # Right: Vibration button
 
-        # LEFT: System status + Date (compact)
+        # LEFT: System status + Date (축소)
         left_frame = tk.Frame(header_frame, bg=COLOR_PANEL)
-        left_frame.grid(row=0, column=0, sticky="w", padx=8, pady=8)
+        left_frame.grid(row=0, column=0, sticky="w", padx=5, pady=3)
 
         self.system_status_label = tk.Label(left_frame, text="시스템 정상",
-                                           font=NORMAL_FONT, bg=COLOR_PANEL, fg=COLOR_OK)
+                                           font=("Noto Sans CJK KR", int(self.normal_font_size * 0.85)), bg=COLOR_PANEL, fg=COLOR_OK)
         self.system_status_label.pack(anchor="w")
 
         self.date_label = tk.Label(left_frame, text="----/--/--",
-                                   font=("Noto Sans CJK KR", int(self.normal_font_size * 0.9)),
+                                   font=("Noto Sans CJK KR", int(self.normal_font_size * 0.75)),
                                    bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT)
         self.date_label.pack(anchor="w")
 
-        # CENTER: Title + Time (compact)
+        # CENTER: Title + Time (축소)
         center_frame = tk.Frame(header_frame, bg=COLOR_PANEL)
-        center_frame.grid(row=0, column=1, sticky="n", pady=5)
+        center_frame.grid(row=0, column=1, sticky="n", pady=3)
 
         tk.Label(center_frame, text="현대자동차 울산점",
-                font=("Noto Sans CJK KR", int(self.large_font_size * 0.85), "bold"),
+                font=("Noto Sans CJK KR", int(self.large_font_size * 0.7), "bold"),
                 bg=COLOR_PANEL, fg=COLOR_ACCENT).pack()
 
         self.time_label = tk.Label(center_frame, text="--:--:--",
-                                   font=("Noto Sans CJK KR", int(22 * self.scale_factor), "bold"),
+                                   font=("Noto Sans CJK KR", int(18 * self.scale_factor), "bold"),
                                    bg=COLOR_PANEL, fg=COLOR_INFO)
         self.time_label.pack()
 
-        # RIGHT: Vibration check button + Settings button (compact)
+        # RIGHT: Vibration check button + Settings button (축소)
         right_frame = tk.Frame(header_frame, bg=COLOR_PANEL)
-        right_frame.grid(row=0, column=2, sticky="e", padx=8, pady=8)
+        right_frame.grid(row=0, column=2, sticky="e", padx=5, pady=3)
 
         # PC Status button
         tk.Button(right_frame, text="PC 상태",
-                 font=("Noto Sans CJK KR", int(self.button_font_size * 0.85), "bold"),
+                 font=("Noto Sans CJK KR", int(self.button_font_size * 0.65), "bold"),
                  command=self.open_pc_status, bg="#00897B", fg="white",
                  relief=tk.FLAT, bd=0, activebackground="#00796B",
-                 padx=12, pady=8).pack(side=tk.LEFT, padx=3)
+                 padx=8, pady=5).pack(side=tk.LEFT, padx=2)
 
         # Vibration check button
         tk.Button(right_frame, text="진동 체크",
-                 font=("Noto Sans CJK KR", int(self.button_font_size * 0.85), "bold"),
+                 font=("Noto Sans CJK KR", int(self.button_font_size * 0.65), "bold"),
                  command=self.open_vibration_check, bg=COLOR_INFO, fg="white",
                  relief=tk.FLAT, bd=0, activebackground=COLOR_BUTTON_HOVER,
-                 padx=12, pady=8).pack(side=tk.LEFT, padx=3)
+                 padx=8, pady=5).pack(side=tk.LEFT, padx=2)
 
         # Settings button (moved from bottom)
         self.settings_btn = tk.Button(right_frame, text="설정",
-                 font=("Noto Sans CJK KR", int(self.button_font_size * 0.85), "bold"),
+                 font=("Noto Sans CJK KR", int(self.button_font_size * 0.65), "bold"),
                  command=self.handle_settings_tap, bg=COLOR_BUTTON, fg="white",
                  relief=tk.FLAT, bd=0, activebackground=COLOR_BUTTON_HOVER,
-                 padx=12, pady=8)
-        self.settings_btn.pack(side=tk.LEFT, padx=3)
+                 padx=8, pady=5)
+        self.settings_btn.pack(side=tk.LEFT, padx=2)
 
         # Bottom control bar FIRST (so it's always visible at bottom)
         self.create_bottom_control_bar()
@@ -399,16 +430,17 @@ class IntegratedMonitorApp:
         # Don't pack it - keep it hidden until 5 taps on Settings
 
     def create_auto_panel(self, parent):
-        """Panel 1: Auto-start/down system - ROW 0 (전체 너비)"""
-        pad = int(10 * self.scale_factor)
-        panel = tk.LabelFrame(parent, text="자동 ON/OFF (사람 감시)", font=LARGE_FONT,
+        """Panel 1: Auto-start/down system - ROW 0 (전체 너비) - 세로 모드 최적화"""
+        pad = int(6 * self.scale_factor)
+        panel = tk.LabelFrame(parent, text="자동 ON/OFF (사람 감시)",
+                             font=("Noto Sans CJK KR", int(self.large_font_size * 0.75), "bold"),
                              bg=COLOR_PANEL, fg=COLOR_ACCENT, bd=2, relief=tk.FLAT,
                              highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
         panel.grid(row=0, column=0, columnspan=2, padx=pad, pady=int(pad/2), sticky="nsew")
 
-        # Status indicators in HORIZONTAL layout (space efficient)
+        # Status indicators in HORIZONTAL layout (space efficient) - 축소
         status_container = tk.Frame(panel, bg=COLOR_PANEL)
-        status_container.pack(pady=10, padx=10, fill=tk.X)
+        status_container.pack(pady=5, padx=5, fill=tk.X)
 
         # Grid layout: 2 rows x 2 columns
         status_container.columnconfigure(0, weight=1)
@@ -430,88 +462,95 @@ class IntegratedMonitorApp:
                                        bg=COLOR_PANEL, fg=COLOR_WARNING, anchor="w")
         self.auto_mqtt_label.grid(row=1, column=1, sticky="w", padx=5, pady=2)
 
-        # Camera preview area (more space now)
+        # Camera preview area (more space now) - 축소
         self.auto_preview_label = tk.Label(panel, text="[카메라 로딩 중...]",
                                           bg="black", fg="white", font=NORMAL_FONT)
-        self.auto_preview_label.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
+        self.auto_preview_label.pack(pady=5, padx=5, fill=tk.BOTH, expand=True)
 
     def create_stirfry_left_panel(self, parent):
-        """Panel 2: Stir-fry monitoring LEFT - ROW 1, LEFT"""
-        pad = int(10 * self.scale_factor)
-        panel = tk.LabelFrame(parent, text="볶음 모니터링 (왼쪽)", font=LARGE_FONT,
+        """Panel 2: Stir-fry monitoring LEFT - ROW 1, LEFT - 세로 모드 최적화"""
+        pad = int(6 * self.scale_factor)
+        panel = tk.LabelFrame(parent, text="볶음 모니터링 (왼쪽)",
+                             font=("Noto Sans CJK KR", int(self.large_font_size * 0.75), "bold"),
                              bg=COLOR_PANEL, fg=COLOR_ACCENT, bd=2, relief=tk.FLAT,
                              highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
         panel.grid(row=1, column=0, padx=pad, pady=int(pad/2), sticky="nsew")
 
-        # Camera preview area - fixed height (3단 세로 배치 최적화)
-        preview_height = int(200 * self.scale_factor)
+        # Camera preview area - fixed height (세로 모드 - 더 작게)
+        preview_height = int(160 * self.scale_factor)
         preview_container = tk.Frame(panel, bg="black", height=preview_height)
-        preview_container.pack(pady=5, padx=10, fill=tk.X)
+        preview_container.pack(pady=3, padx=5, fill=tk.X)
         preview_container.pack_propagate(False)
 
         self.stirfry_left_preview_label = tk.Label(preview_container, text="[카메라 로딩 중...]",
                                                    bg="black", fg="white", font=NORMAL_FONT)
         self.stirfry_left_preview_label.pack(fill=tk.BOTH, expand=True)
 
-        # Status info
+        # Status info - 축소
         info_frame = tk.Frame(panel, bg=COLOR_PANEL)
-        info_frame.pack(pady=10, fill=tk.X)
+        info_frame.pack(pady=3, fill=tk.X)
 
         self.stirfry_left_count_label = tk.Label(info_frame, text="저장: 0장",
-                                                 font=MEDIUM_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
-        self.stirfry_left_count_label.pack(pady=5)
+                                                 font=("Noto Sans CJK KR", int(self.medium_font_size * 0.9)),
+                                                 bg=COLOR_PANEL, fg=COLOR_TEXT)
+        self.stirfry_left_count_label.pack(pady=2)
 
     def create_stirfry_right_panel(self, parent):
-        """Panel 3: Stir-fry monitoring RIGHT - ROW 1, RIGHT"""
-        pad = int(10 * self.scale_factor)
-        panel = tk.LabelFrame(parent, text="볶음 모니터링 (오른쪽)", font=LARGE_FONT,
+        """Panel 3: Stir-fry monitoring RIGHT - ROW 1, RIGHT - 세로 모드 최적화"""
+        pad = int(6 * self.scale_factor)
+        panel = tk.LabelFrame(parent, text="볶음 모니터링 (오른쪽)",
+                             font=("Noto Sans CJK KR", int(self.large_font_size * 0.75), "bold"),
                              bg=COLOR_PANEL, fg=COLOR_ACCENT, bd=2, relief=tk.FLAT,
                              highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
         panel.grid(row=1, column=1, padx=pad, pady=int(pad/2), sticky="nsew")
 
-        # Camera preview area - fixed height (3단 세로 배치 최적화)
-        preview_height = int(200 * self.scale_factor)
+        # Camera preview area - fixed height (세로 모드 - 더 작게)
+        preview_height = int(160 * self.scale_factor)
         preview_container = tk.Frame(panel, bg="black", height=preview_height)
-        preview_container.pack(pady=5, padx=10, fill=tk.X)
+        preview_container.pack(pady=3, padx=5, fill=tk.X)
         preview_container.pack_propagate(False)
 
         self.stirfry_right_preview_label = tk.Label(preview_container, text="[카메라 로딩 중...]",
                                                     bg="black", fg="white", font=NORMAL_FONT)
         self.stirfry_right_preview_label.pack(fill=tk.BOTH, expand=True)
 
-        # Status info
+        # Status info - 축소
         info_frame = tk.Frame(panel, bg=COLOR_PANEL)
-        info_frame.pack(pady=10, fill=tk.X)
+        info_frame.pack(pady=3, fill=tk.X)
 
         self.stirfry_right_count_label = tk.Label(info_frame, text="저장: 0장",
-                                                  font=MEDIUM_FONT, bg=COLOR_PANEL, fg=COLOR_TEXT)
-        self.stirfry_right_count_label.pack(pady=5)
+                                                  font=("Noto Sans CJK KR", int(self.medium_font_size * 0.9)),
+                                                  bg=COLOR_PANEL, fg=COLOR_TEXT)
+        self.stirfry_right_count_label.pack(pady=2)
 
     def create_bottom_control_bar(self):
-        """하단 컨트롤 바 (녹화 버튼들)"""
+        """하단 컨트롤 바 (녹화 버튼들) - 세로 모드 최적화"""
         control_bar = tk.Frame(self.root, bg=COLOR_PANEL, bd=1, relief=tk.FLAT,
                               highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
         control_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=0, pady=0)
 
         btn_container = tk.Frame(control_bar, bg=COLOR_PANEL)
-        btn_container.pack(pady=8, padx=10, fill=tk.X)
+        btn_container.pack(pady=4, padx=5, fill=tk.X)
 
-        self.stirfry_start_btn = tk.Button(btn_container, text="녹화 시작", font=BUTTON_FONT,
+        self.stirfry_start_btn = tk.Button(btn_container, text="녹화 시작",
+                                          font=("Noto Sans CJK KR", int(self.button_font_size * 0.7), "bold"),
                                           command=self.start_stirfry_recording,
                                           bg=COLOR_OK, fg="white", relief=tk.FLAT, bd=0,
-                                          activebackground="#00B248", height=2)
-        self.stirfry_start_btn.pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
+                                          activebackground="#00B248", height=1)
+        self.stirfry_start_btn.pack(side=tk.LEFT, padx=3, fill=tk.BOTH, expand=True)
 
-        self.stirfry_stop_btn = tk.Button(btn_container, text="녹화 중지", font=BUTTON_FONT,
+        self.stirfry_stop_btn = tk.Button(btn_container, text="녹화 중지",
+                                         font=("Noto Sans CJK KR", int(self.button_font_size * 0.7), "bold"),
                                          command=self.stop_stirfry_recording,
                                          bg=COLOR_ERROR, fg="white", state=tk.DISABLED,
-                                         relief=tk.FLAT, bd=0, activebackground="#C62828", height=2)
-        self.stirfry_stop_btn.pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
+                                         relief=tk.FLAT, bd=0, activebackground="#C62828", height=1)
+        self.stirfry_stop_btn.pack(side=tk.LEFT, padx=3, fill=tk.BOTH, expand=True)
 
-        tk.Button(btn_container, text="종료", font=BUTTON_FONT,
+        tk.Button(btn_container, text="종료",
+                 font=("Noto Sans CJK KR", int(self.button_font_size * 0.7), "bold"),
                  command=self.on_closing,
                  bg="#424242", fg="white", relief=tk.FLAT, bd=0,
-                 activebackground="#616161", height=2).pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
+                 activebackground="#616161", height=1).pack(side=tk.LEFT, padx=3, fill=tk.BOTH, expand=True)
 
     def create_dev_panel(self, parent):
         """Panel 4: Developer mode (debugging panel) - BOTTOM with scrolling (spans both columns)"""
@@ -637,9 +676,25 @@ class IntegratedMonitorApp:
                 system_info=self.system_info.to_dict()
             )
 
+            # Subscribe to food type and control topics (from Robot PC)
+            self.mqtt_client.subscribe(MQTT_TOPIC_STIRFRY_FOOD_TYPE, self.on_stirfry_food_type)
+            self.mqtt_client.subscribe(MQTT_TOPIC_STIRFRY_CONTROL, self.on_stirfry_control)
+
             # Connect to broker
             if self.mqtt_client.connect(blocking=True, timeout=5.0):
-                print("[MQTT] 연결 성공")
+                print(f"[MQTT] 연결 성공: {MQTT_BROKER}:{MQTT_PORT}")
+                print(f"[MQTT] Device: {DEVICE_ID} ({DEVICE_NAME}) @ {get_ip_address()}")
+                print(f"[MQTT] 구독 토픽 (로봇→Jetson):")
+                print(f"  - {MQTT_TOPIC_STIRFRY_FOOD_TYPE}")
+                print(f"[MQTT] 발행 토픽 (Jetson→로봇):")
+                print(f"  - {MQTT_TOPIC_SYSTEM_AI_MODE}")
+                print(f"  - {MQTT_TOPIC_STIRFRY_STATUS}")
+
+                # Publish AI mode status from config
+                ai_mode_status = "ON" if AI_MODE_ENABLED else "OFF"
+                self.send_mqtt_message(MQTT_TOPIC_SYSTEM_AI_MODE, ai_mode_status)
+                print(f"[MQTT] AI 모드 발행: {ai_mode_status} (config: ai_mode_enabled={AI_MODE_ENABLED})")
+
                 self.auto_mqtt_label.config(text="MQTT: 연결됨", fg=COLOR_OK)
             else:
                 print("[MQTT] 연결 실패")
@@ -648,6 +703,43 @@ class IntegratedMonitorApp:
         except Exception as e:
             print(f"[MQTT] 초기화 실패: {e}")
             self.auto_mqtt_label.config(text=f"MQTT: 오류", fg=COLOR_ERROR)
+
+    def on_stirfry_food_type(self, client, userdata, message):
+        """MQTT callback for stir-fry food type - AUTO START recording"""
+        try:
+            self.current_stirfry_food_type = message.payload.decode()
+            print(f"[MQTT] 볶음 음식 종류 수신: {self.current_stirfry_food_type}")
+
+            # AUTO START: If not recording, start automatically
+            if not self.stirfry_recording:
+                print(f"[MQTT] 자동 녹화 시작 - 음식: {self.current_stirfry_food_type}")
+                self.root.after(0, self.start_stirfry_recording)
+            else:
+                # If already recording, store as metadata event
+                from datetime import datetime
+                self.stirfry_metadata.append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                    "type": "food_type_change",
+                    "value": self.current_stirfry_food_type
+                })
+                print(f"[MQTT] 녹화 중 음식 종류 변경: {self.current_stirfry_food_type}")
+        except Exception as e:
+            print(f"[MQTT] 음식 종류 수신 오류: {e}")
+
+    def on_stirfry_control(self, client, userdata, message):
+        """MQTT callback for stir-fry control commands - AUTO STOP"""
+        try:
+            command = message.payload.decode().strip().lower()
+            print(f"[MQTT] 볶음 제어 명령 수신: {command}")
+
+            if command == "stop":
+                if self.stirfry_recording:
+                    print(f"[MQTT] 자동 녹화 중지")
+                    self.root.after(0, self.stop_stirfry_recording)
+                else:
+                    print(f"[MQTT] 녹화 중이 아님 - 무시")
+        except Exception as e:
+            print(f"[MQTT] 제어 명령 수신 오류: {e}")
 
     def init_cameras(self):
         """Initialize all cameras with GStreamer (optimized for UYVY)"""
@@ -1282,6 +1374,32 @@ class IntegratedMonitorApp:
             except Exception as e:
                 print(f"[MQTT] 전송 오류: {e}")
 
+    def send_mqtt_message(self, topic, message, include_device_info=True):
+        """Send MQTT message with optional device info"""
+        if self.mqtt_client and MQTT_ENABLED:
+            try:
+                if include_device_info:
+                    # Create JSON message with device info
+                    msg_data = {
+                        "device_id": DEVICE_ID,
+                        "device_name": DEVICE_NAME,
+                        "device_location": DEVICE_LOCATION,
+                        "ip_address": get_ip_address(),
+                        "message": message,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    payload = json.dumps(msg_data, ensure_ascii=False)
+                else:
+                    payload = message
+
+                self.mqtt_client.publish(
+                    topic_suffix=topic,
+                    payload=payload,
+                    qos=MQTT_QOS
+                )
+            except Exception as e:
+                print(f"[MQTT] 전송 실패: {e}")
+
     def save_snapshot(self, frame, timestamp):
         """Save motion snapshot"""
         try:
@@ -1322,15 +1440,15 @@ class IntegratedMonitorApp:
             print(f"[오류] 스냅샷 저장 실패: {e}")
 
     def save_stirfry_left_frame(self, frame):
-        """Save stir-fry LEFT monitoring frame (optimized for storage)"""
+        """Save stir-fry LEFT monitoring frame (session-based)"""
         try:
             now = datetime.now()
-            day_dir = now.strftime("%Y%m%d")
             ts_name = now.strftime("%H%M%S_%f")[:-3]  # Include milliseconds
 
-            # Use absolute path in user's home directory to avoid permission issues
+            # Use session-based folder structure
             base_dir = os.path.expanduser(f"~/{STIRFRY_SAVE_DIR}")
-            out_dir = os.path.join(base_dir, "left", day_dir)
+            session_dir = os.path.join(base_dir, self.stirfry_session_id, self.current_stirfry_food_type)
+            out_dir = os.path.join(session_dir, "left")
 
             # Create directory with proper permissions
             os.makedirs(out_dir, mode=0o755, exist_ok=True)
@@ -1357,15 +1475,15 @@ class IntegratedMonitorApp:
             traceback.print_exc()
 
     def save_stirfry_right_frame(self, frame):
-        """Save stir-fry RIGHT monitoring frame (optimized for storage)"""
+        """Save stir-fry RIGHT monitoring frame (session-based)"""
         try:
             now = datetime.now()
-            day_dir = now.strftime("%Y%m%d")
             ts_name = now.strftime("%H%M%S_%f")[:-3]  # Include milliseconds
 
-            # Use absolute path in user's home directory to avoid permission issues
+            # Use session-based folder structure
             base_dir = os.path.expanduser(f"~/{STIRFRY_SAVE_DIR}")
-            out_dir = os.path.join(base_dir, "right", day_dir)
+            session_dir = os.path.join(base_dir, self.stirfry_session_id, self.current_stirfry_food_type)
+            out_dir = os.path.join(session_dir, "right")
 
             # Create directory with proper permissions
             os.makedirs(out_dir, mode=0o755, exist_ok=True)
@@ -1396,24 +1514,92 @@ class IntegratedMonitorApp:
     # =========================
     def start_stirfry_recording(self):
         """Start stir-fry data recording for BOTH cameras"""
+        from datetime import datetime
+
         self.stirfry_recording = True
         self.stirfry_left_frame_count = 0
         self.stirfry_right_frame_count = 0
         self.stirfry_frame_skip_counter = 0  # Reset frame skip counter
+
+        # Create session ID
+        self.stirfry_session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.stirfry_session_start_time = datetime.now()
+        self.stirfry_metadata = []  # Reset metadata
+
+        # Store initial metadata
+        self.stirfry_metadata.append({
+            "timestamp": self.stirfry_session_start_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "type": "session_start",
+            "session_id": self.stirfry_session_id,
+            "food_type": self.current_stirfry_food_type
+        })
+
         self.stirfry_start_btn.config(state=tk.DISABLED)
         self.stirfry_stop_btn.config(state=tk.NORMAL)
-        print("[볶음] 녹화 시작 (왼쪽 + 오른쪽) - 해상도: 960x768, 품질: 70%, ~3 FPS")
+        print(f"[볶음] 녹화 시작 - 세션: {self.stirfry_session_id}, 음식: {self.current_stirfry_food_type}")
 
     def stop_stirfry_recording(self):
         """Stop stir-fry data recording for BOTH cameras"""
+        from datetime import datetime
+        import json
+
         self.stirfry_recording = False
         self.stirfry_frame_skip_counter = 0  # Reset frame skip counter
+
+        # Add session end metadata
+        if self.stirfry_session_start_time:
+            session_end_time = datetime.now()
+            duration = (session_end_time - self.stirfry_session_start_time).total_seconds()
+
+            self.stirfry_metadata.append({
+                "timestamp": session_end_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "type": "session_end",
+                "duration_seconds": duration,
+                "left_frame_count": self.stirfry_left_frame_count,
+                "right_frame_count": self.stirfry_right_frame_count,
+                "total_frames": self.stirfry_left_frame_count + self.stirfry_right_frame_count
+            })
+
+            # Save metadata JSON file
+            try:
+                base_dir = os.path.expanduser(f"~/{STIRFRY_SAVE_DIR}")
+                metadata_dir = os.path.join(base_dir, self.stirfry_session_id)
+                os.makedirs(metadata_dir, mode=0o755, exist_ok=True)
+
+                metadata_file = os.path.join(metadata_dir, "metadata.json")
+                metadata_content = {
+                    "session_id": self.stirfry_session_id,
+                    "food_type": self.current_stirfry_food_type,
+                    "start_time": self.stirfry_session_start_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "end_time": session_end_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "duration_seconds": duration,
+                    "left_frames": self.stirfry_left_frame_count,
+                    "right_frames": self.stirfry_right_frame_count,
+                    "total_frames": self.stirfry_left_frame_count + self.stirfry_right_frame_count,
+                    "resolution": {
+                        "width": STIRFRY_SAVE_RESOLUTION['width'],
+                        "height": STIRFRY_SAVE_RESOLUTION['height']
+                    },
+                    "jpeg_quality": STIRFRY_JPEG_QUALITY,
+                    "frame_skip": STIRFRY_FRAME_SKIP,
+                    "device_id": DEVICE_ID,
+                    "device_name": DEVICE_NAME,
+                    "events": self.stirfry_metadata
+                }
+
+                with open(metadata_file, 'w', encoding='utf-8') as f:
+                    json.dump(metadata_content, f, ensure_ascii=False, indent=2)
+
+                print(f"[볶음] 메타데이터 저장 완료: {metadata_file}")
+            except Exception as e:
+                print(f"[오류] 메타데이터 저장 실패: {e}")
+
         self.stirfry_start_btn.config(state=tk.NORMAL)
         self.stirfry_stop_btn.config(state=tk.DISABLED)
         total_frames = self.stirfry_left_frame_count + self.stirfry_right_frame_count
         print(f"[볶음] 녹화 중지 - 왼쪽: {self.stirfry_left_frame_count}장, 오른쪽: {self.stirfry_right_frame_count}장")
         messagebox.showinfo("녹화 완료",
-                          f"왼쪽: {self.stirfry_left_frame_count}장\n오른쪽: {self.stirfry_right_frame_count}장\n총: {total_frames}장")
+                          f"세션: {self.stirfry_session_id}\n음식: {self.current_stirfry_food_type}\n왼쪽: {self.stirfry_left_frame_count}장\n오른쪽: {self.stirfry_right_frame_count}장\n총: {total_frames}장")
 
     def open_pc_status(self):
         """Open PC/Jetson status monitoring dialog"""
@@ -1519,16 +1705,17 @@ class IntegratedMonitorApp:
         import subprocess
         import os
 
-        vibration_script = "/home/dkuyj/jetson-camera-monitor/vibration_sensor_simple.py"
-        vibration_dir = "/home/dkuyj/jetson-camera-monitor"
+        # 상대 경로로 수정 (jetson-food-ai 기준)
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        vibration_script = os.path.join(base_dir, "vibration_sensor_simple.py")
 
         if not os.path.exists(vibration_script):
             print(f"[진동] 오류: {vibration_script} 파일이 없습니다")
             return
 
         try:
-            # 진동 센서 프로그램을 별도 프로세스로 실행 (작업 디렉토리 지정)
-            proc = subprocess.Popen(["python3", vibration_script], cwd=vibration_dir)
+            # 진동 센서 프로그램을 별도 프로세스로 실행
+            proc = subprocess.Popen(["python3", vibration_script], cwd=base_dir)
             self.child_processes.append(proc)
             print("[진동] 진동 센서 프로그램 실행")
         except Exception as e:
@@ -1617,27 +1804,41 @@ class IntegratedMonitorApp:
                         except Exception as e:
                             print(f"[종료] 자식 프로세스 종료 오류: {e}")
 
-                    # Cleanup GstCamera cameras
-                    if self.auto_cap is not None:
-                        print("[종료] 자동 카메라 중지 중...")
+                    # Cleanup GstCamera cameras with timeout
+                    print("[종료] 카메라 해제 중...")
+                    import threading
+
+                    def stop_camera_safe(cap, name):
                         try:
-                            self.auto_cap.stop()
-                        except:
-                            pass
+                            cap.stop()
+                            print(f"[종료] {name} 해제 완료")
+                        except Exception as e:
+                            print(f"[종료] {name} 해제 오류: {e}")
+
+                    threads = []
+                    if self.auto_cap is not None:
+                        t = threading.Thread(target=stop_camera_safe, args=(self.auto_cap, "auto_cap"))
+                        t.daemon = True
+                        t.start()
+                        threads.append(t)
 
                     if self.stirfry_left_cap is not None:
-                        print("[종료] 왼쪽 카메라 중지 중...")
-                        try:
-                            self.stirfry_left_cap.stop()
-                        except:
-                            pass
+                        t = threading.Thread(target=stop_camera_safe, args=(self.stirfry_left_cap, "stirfry_left"))
+                        t.daemon = True
+                        t.start()
+                        threads.append(t)
 
                     if self.stirfry_right_cap is not None:
-                        print("[종료] 오른쪽 카메라 중지 중...")
-                        try:
-                            self.stirfry_right_cap.stop()
-                        except:
-                            pass
+                        t = threading.Thread(target=stop_camera_safe, args=(self.stirfry_right_cap, "stirfry_right"))
+                        t.daemon = True
+                        t.start()
+                        threads.append(t)
+
+                    # Wait for all threads with timeout
+                    for t in threads:
+                        t.join(timeout=2.0)
+
+                    print("[종료] 카메라 해제 완료")
 
                     # Cleanup MQTT
                     if self.mqtt_client is not None:

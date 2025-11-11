@@ -1,4 +1,4 @@
-# Python dependencies for JETSON1_INTEGRATED.py
+# Python dependencies for JETSON2_INTEGRATED.py
 # Jetson Orin Nano용
 
 # MQTT 통신
@@ -7,7 +7,7 @@ paho-mqtt>=1.6.1
 # 이미지 처리
 Pillow>=9.0.0
 
-# YOLO 객체 감지
+# YOLO 객체 감지 및 분류
 ultralytics>=8.0.0
 
 # NumPy (1.x 버전으로 고정 - matplotlib 호환성)
@@ -22,10 +22,10 @@ matplotlib>=3.5.0
 # OpenCV는 Jetson에 기본 설치되어 있으므로 여기서 제외
 # opencv-python>=4.5.0  # Jetson에서는 시스템 패키지 사용
 
-# GStreamer Python 바인딩 (시스템 패키지로 설치 필요)
-# PyGObject는 apt로 설치: sudo apt install python3-gi
-
 # PyTorch (CUDA 지원 버전 필요)
 # 수동 설치 필요:
 # pip3 uninstall -y torch torchvision
 # pip3 install torch torchvision --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+
+# GStreamer Python 바인딩 (시스템 패키지로 설치 필요)
+# PyGObject는 apt로 설치: sudo apt install python3-gi

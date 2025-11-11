@@ -115,10 +115,17 @@ cd ~/jetson-camera-monitor/jetson2_frying_ai
 ./install_autostart.sh         # 자동 시작 활성화
 
 # 상태 확인
-sudo systemctl status jetson-monitor.service    # Jetson #1
-sudo systemctl status jetson2-ai.service        # Jetson #2
-sudo systemctl status sensing-camera.service    # 카메라 드라이버
+sudo systemctl status jetson1-monitor    # Jetson #1
+sudo systemctl status jetson2-monitor    # Jetson #2
+sudo systemctl status gmsl-driver-load   # GMSL 드라이버
+
+# 실시간 로그 확인 (가장 유용!) ⭐
+sudo journalctl -u jetson2-monitor -f    # Jetson #2
+sudo journalctl -u jetson1-monitor -f    # Jetson #1
+# 종료: Ctrl+C
 ```
+
+💡 **로그 확인 및 디버깅**: 자세한 내용은 [배포가이드.md](배포가이드.md#로그-확인) 참고
 
 ### 검증
 ```bash
@@ -155,17 +162,16 @@ python3 -c "import torch; print(torch.cuda.is_available())"
 ```bash
 ls -l /dev/video*
 
-# Jetson #1
-cd ~/jetson-camera-monitor/jetson1_monitoring/camera_autostart
-sudo ./camera_driver_autoload.sh
+# GMSL 드라이버 로그 확인
+cat /tmp/gmsl_driver_load.log
 
-# Jetson #2
-cd ~/jetson-camera-monitor/jetson2_frying_ai/camera_autostart
-sudo ./camera_driver_autoload.sh
+# 서비스 확인
+sudo systemctl status gmsl-driver-load
+sudo journalctl -u gmsl-driver-load -f
 
-# 또는 서비스 확인
-sudo systemctl status sensing-camera.service
-sudo journalctl -u sensing-camera.service -f
+# 수동 실행 (테스트용)
+cd ~/jetson-camera-monitor/SG4A-NONX-G2Y-A1_ORIN_NANO_YUV_JP6.2_L4TR36.4.3
+sudo ./quick_bring_up.sh
 ```
 
 ### 2-1. 진동 센서 안 보임 (USB-RS485)
