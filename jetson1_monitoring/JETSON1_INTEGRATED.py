@@ -405,6 +405,12 @@ class IntegratedMonitorApp:
                                    bg=COLOR_PANEL, fg=COLOR_INFO)
         self.time_label.pack()
 
+        # Disk space indicator (below time)
+        self.disk_label = tk.Label(center_frame, text="💾 ---GB / ---GB",
+                                   font=("Noto Sans CJK KR", int(10 * self.scale_factor)),
+                                   bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT)
+        self.disk_label.pack()
+
         # RIGHT: Vibration check button + Settings button (축소)
         right_frame = tk.Frame(header_frame, bg=COLOR_PANEL)
         right_frame.grid(row=0, column=2, sticky="e", padx=5, pady=3)
@@ -893,6 +899,21 @@ class IntegratedMonitorApp:
             if current_second == 0 or not hasattr(self, '_date_set'):
                 self.date_label.config(text=now.strftime("%Y년 %m월 %d일"))
                 self._date_set = True
+
+                # Update disk space (every minute to avoid overhead)
+                try:
+                    import psutil
+                    disk = psutil.disk_usage('/')
+                    used_gb = disk.used / (1024**3)
+                    total_gb = disk.total / (1024**3)
+                    percent = disk.percent
+                    disk_color = COLOR_OK if percent < 70 else COLOR_WARNING if percent < 90 else COLOR_ERROR
+                    self.disk_label.config(
+                        text=f"💾 {used_gb:.0f}GB / {total_gb:.0f}GB ({percent:.1f}%)",
+                        fg=disk_color
+                    )
+                except Exception as e:
+                    self.disk_label.config(text="💾 용량 정보 없음", fg=COLOR_TEXT)
 
         # Update every 200ms for smooth second transitions
         self.root.after(200, self.update_clock)

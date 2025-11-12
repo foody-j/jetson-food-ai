@@ -587,6 +587,12 @@ class JetsonIntegratedApp:
                                    bg=COLOR_PANEL, fg=COLOR_INFO)
         self.time_label.pack()
 
+        # Disk space indicator (below time)
+        self.disk_label = tk.Label(center_frame, text="💾 ---GB / ---GB",
+                                   font=("Noto Sans CJK KR", 10),
+                                   bg=COLOR_PANEL, fg=COLOR_TEXT_LIGHT)
+        self.disk_label.pack()
+
         # Keyboard shortcuts hint (세로 모드 - 폰트 축소)
         tk.Label(center_frame, text="F11: 전체화면 | ESC: 창모드",
                 font=("Noto Sans CJK KR", 8),
@@ -981,10 +987,32 @@ class JetsonIntegratedApp:
             return
 
         now = datetime.now()
-        self.time_label.config(text=now.strftime("%H:%M:%S"))
-        self.date_label.config(text=now.strftime("%Y/%m/%d"))
+        current_second = now.second
 
-        self.root.after(1000, self.update_clock)
+        # Only update if second has changed (reduce flickering)
+        if not hasattr(self, '_last_second') or self._last_second != current_second:
+            self._last_second = current_second
+            self.time_label.config(text=now.strftime("%H:%M:%S"))
+            self.date_label.config(text=now.strftime("%Y/%m/%d"))
+
+            # Update disk space (every minute to avoid overhead)
+            if current_second == 0 or not hasattr(self, '_disk_updated'):
+                try:
+                    import psutil
+                    disk = psutil.disk_usage('/')
+                    used_gb = disk.used / (1024**3)
+                    total_gb = disk.total / (1024**3)
+                    percent = disk.percent
+                    disk_color = COLOR_OK if percent < 70 else COLOR_WARNING if percent < 90 else COLOR_ERROR
+                    self.disk_label.config(
+                        text=f"💾 {used_gb:.0f}GB / {total_gb:.0f}GB ({percent:.1f}%)",
+                        fg=disk_color
+                    )
+                    self._disk_updated = True
+                except Exception as e:
+                    self.disk_label.config(text="💾 용량 정보 없음", fg=COLOR_TEXT)
+
+        self.root.after(200, self.update_clock)
 
     def update_frying_left(self):
         """Update Frying AI left camera - OPTIMIZED with frame skip"""
