@@ -7,8 +7,11 @@ Jetson Orin Nano의 GPIO를 사용하여 SSR(Solid State Relay) 릴레이를 제
 
 ### 2.1 필요한 부품
 - **SSR 릴레이 모듈** (예: Fotek SSR-25DA, OMRON G3MB 등)
-  - 입력: 3-32V DC (Jetson 3.3V GPIO로 제어 가능)
+  - 입력: 3-32V DC (5V 권장)
   - 출력: AC 240V or DC 24V (로봇 PC 전원 스위치 대체)
+- **레벨 시프터 모듈** (3.3V ↔ 5V 양방향 변환)
+  - 예: 4채널 레벨 시프터, TXS0108E 모듈
+  - Jetson GPIO 3.3V를 5V로 변환하여 SSR 안정 구동
 - **점퍼 와이어** (암-암 또는 암-수)
 - **(선택) LED + 저항** (동작 확인용)
 
@@ -30,12 +33,24 @@ Jetson Orin Nano의 GPIO를 사용하여 SSR(Solid State Relay) 릴레이를 제
 | **13**  | GPIO398  | SPI 대체 가능 |
 | **15**  | GPIO433  | PWM 지원 (필요시) |
 
-### 2.3 연결 방법
+### 2.3 연결 방법 (레벨 시프터 사용)
+
+#### 레벨 시프터 연결
+```
+Jetson                    레벨 시프터
+────────────────────      ──────────────
+3.3V 핀 (1번)      ────► LV (Low Voltage 전원)
+5V 핀 (2번)        ────► HV (High Voltage 전원)
+GND 핀 (6번)       ────► GND (공통 접지)
+GPIO 핀 (7번)      ────► LV1 (3.3V 입력)
+```
 
 #### SSR 입력부 (제어부)
 ```
-Jetson GPIO 핀 (7번)  ──────► SSR 입력 (+)
-Jetson GND 핀 (6번)   ──────► SSR 입력 (-)
+레벨 시프터               SSR 릴레이
+──────────────           ────────────
+HV1 (5V 출력)    ──────► SSR 입력 (+)
+GND              ──────► SSR 입력 (-)
 ```
 
 #### SSR 출력부 (로봇 PC 전원)
@@ -55,10 +70,18 @@ Jetson GND 핀 (6번)   ──────► SSR 입력 (-)
 ┌─────────────────┐
 │ Jetson Orin Nano│
 │                 │
-│  [7] GPIO492  ──┼──┐
+│  [1] 3.3V     ──┼──┐
+│  [2] 5V       ──┼──┤
 │  [6] GND      ──┼──┤
+│  [7] GPIO492  ──┼──┤
 └─────────────────┘  │
                      │
+              ┌──────▼──────────┐
+              │  레벨 시프터     │
+              │  LV  HV  GND    │
+              │  LV1 HV1        │
+              └──────┬──────────┘
+                     │ HV1 (5V)
                 ┌────▼────┐
                 │   SSR   │
                 │ 입력 +-  │
@@ -72,9 +95,61 @@ Jetson GND 핀 (6번)   ──────► SSR 입력 (-)
               └─────────────────┘
 ```
 
+### 2.5 GPIO 핀 변경 방법
+
+**기본 핀:** 7번 (GPIO492)
+
+**다른 사용 가능한 GPIO 핀:**
+| 물리적 핀 | GPIO 번호 | 특징 |
+|---------|----------|------|
+| **11**  | GPIO460  | UART 대체 가능 |
+| **13**  | GPIO398  | SPI 대체 가능 |
+| **15**  | GPIO433  | PWM 지원 |
+| **16**  | GPIO474  | 일반 GPIO |
+| **18**  | GPIO473  | 일반 GPIO |
+| **33**  | GPIO391  | PWM 지원 |
+
+**⚠️ 절대 사용하면 안 되는 핀:**
+- **1, 17번**: 3.3V 전원 (GPIO 아님)
+- **2, 4번**: 5V 전원 (GPIO 아님)
+- **6, 9, 14, 20, 25, 30, 34, 39번**: GND (GPIO 아님)
+- **27, 28번**: I2C EEPROM 전용 (건드리면 부팅 불가)
+
+**핀 번호 변경 방법:**
+```python
+# test_gpio_relay.py 파일에서
+RELAY_PIN = 7  # 원하는 핀 번호로 변경 (예: 11, 13, 15 등)
+
+# 또는 config.json에서
+"gpio_relay_pin": 7  # 원하는 핀 번호로 변경
+```
+
 ## 3. 소프트웨어 설정
 
 ### 3.1 GPIO 테스트
+
+#### ⚠️ Jetson Orin Nano Super 사용자 필독
+**Jetson Orin Nano Super** 모델은 환경 변수 설정이 필요합니다:
+
+```bash
+cd /home/yjk/jetson-food-ai
+
+# 방법 1: 환경 변수 설정 스크립트 (권장)
+./test_gpio_with_env.sh
+
+# 방법 2: 수동으로 환경 변수 설정
+export JETSON_MODEL_NAME=JETSON_ORIN_NANO
+sudo -E python3 test_gpio_relay.py 1
+
+# 방법 3: libgpiod 사용 (환경변수 불필요)
+python3 check_gpio_with_gpiod.py
+```
+
+**배경**: Jetson Orin Nano Super는 `nvidia,p3768-0000+p3767-0005-super` 모델명을 사용하는데,
+Jetson.GPIO 라이브러리(v2.1.7)가 `-super` 접미사를 인식하지 못합니다.
+환경 변수로 모델을 명시하면 해결됩니다. ([NVIDIA Issue #120](https://github.com/NVIDIA/jetson-gpio/issues/120))
+
+#### 일반 GPIO 릴레이 테스트
 ```bash
 cd /home/yjk/jetson-food-ai
 
@@ -83,6 +158,9 @@ sudo python3 test_gpio_relay.py 1
 
 # 수동 제어 모드
 sudo python3 test_gpio_relay.py 2
+
+# 전체 GPIO 핀 상태 확인 (쇼트 점검용)
+./test_gpio_with_env.sh
 ```
 
 ### 3.2 GPIO 권한 설정 (선택사항)
@@ -139,23 +217,45 @@ sudo chmod 220 /sys/class/gpio/export /sys/class/gpio/unexport
 
 ## 6. 트러블슈팅
 
-### 문제 1: "Permission denied" 오류
+### 문제 1: "Could not determine Jetson model" 오류 (Orin Nano Super)
+```
+Exception: Could not determine Jetson model
+```
+
+**원인**: Jetson Orin Nano Super 모델명에 `-super` 접미사가 포함되어 라이브러리가 인식 못함
+
+**해결 방법**:
+```bash
+# 방법 1: 환경 변수 설정 (권장)
+export JETSON_MODEL_NAME=JETSON_ORIN_NANO
+sudo -E python3 test_gpio_relay.py
+
+# 방법 2: 스크립트 사용
+./test_gpio_with_env.sh
+
+# 방법 3: libgpiod 사용
+python3 check_gpio_with_gpiod.py
+```
+
+**참고**: [NVIDIA Jetson GPIO Issue #120](https://github.com/NVIDIA/jetson-gpio/issues/120)
+
+### 문제 2: "Permission denied" 오류
 ```bash
 # 해결: sudo로 실행
 sudo python3 test_gpio_relay.py
 ```
 
-### 문제 2: 릴레이가 동작하지 않음
+### 문제 3: 릴레이가 동작하지 않음
 1. 멀티미터로 GPIO 핀 전압 측정 (HIGH: 3.3V, LOW: 0V)
 2. SSR 입력 LED 확인 (켜지는지)
 3. 와이어 연결 재확인
 
-### 문제 3: 로봇 PC가 켜지지 않음
+### 문제 4: 로봇 PC가 켜지지 않음
 1. SSR 출력부 연결 확인
 2. 메인보드 PWR_BTN 핀 위치 재확인
 3. 케이스 전원 버튼으로 수동 테스트
 
-### 문제 4: GPIO 충돌
+### 문제 5: GPIO 충돌
 ```bash
 # 사용 중인 GPIO 확인
 ls /sys/class/gpio/
