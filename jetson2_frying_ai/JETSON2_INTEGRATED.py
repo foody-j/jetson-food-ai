@@ -68,6 +68,40 @@ def get_ip_address():
     except:
         return "unknown"
 
+# =========================
+# Popup Helper Functions
+# =========================
+def show_popup_topmost(func, title, message, **kwargs):
+    """Show messagebox always on top"""
+    temp = tk.Toplevel()
+    temp.withdraw()
+    temp.attributes('-topmost', True)
+    temp.lift()
+    temp.focus_force()
+
+    try:
+        result = func(title, message, parent=temp, **kwargs)
+    finally:
+        temp.destroy()
+
+    return result
+
+def showinfo_topmost(title, message):
+    """Show info dialog always on top"""
+    return show_popup_topmost(showinfo_topmost, title, message)
+
+def showwarning_topmost(title, message):
+    """Show warning dialog always on top"""
+    return show_popup_topmost(showwarning_topmost, title, message)
+
+def showerror_topmost(title, message):
+    """Show error dialog always on top"""
+    return show_popup_topmost(showerror_topmost, title, message)
+
+def askokcancel_topmost(title, message):
+    """Show ok/cancel dialog always on top"""
+    return show_popup_topmost(askokcancel_topmost, title, message)
+
 config = load_config()
 
 # Frying AI Configuration (video0, video1)
@@ -1586,7 +1620,7 @@ class JetsonIntegratedApp:
 
     def open_settings(self):
         """Open settings dialog (placeholder)"""
-        messagebox.showinfo("설정", "설정 기능은 준비 중입니다.\nconfig_jetson2.json 파일을 직접 수정하세요.")
+        showinfo_topmost("설정", "설정 기능은 준비 중입니다.\nconfig_jetson2.json 파일을 직접 수정하세요.")
 
     def mark_completion_auto(self, position, probe_temp):
         """Automatically mark completion when probe temp reaches target"""
@@ -1670,7 +1704,7 @@ class JetsonIntegratedApp:
 
         # Production: food_type comes from MQTT only
         if self.current_food_type == "unknown":
-            messagebox.showwarning(
+            showwarning_topmost(
                 "경고",
                 "음식 종류가 설정되지 않았습니다.\n\n"
                 "로봇 PC에서 MQTT로 음식 종류를 전송해주세요.\n"
@@ -1793,7 +1827,7 @@ class JetsonIntegratedApp:
             method = self.collection_completion_info.get("method", "unknown")
             completion_text = f"\n완료 마킹: {method} ({elapsed:.1f}초)"
 
-        messagebox.showinfo(
+        showinfo_topmost(
             "데이터 수집 완료",
             f"세션: {self.collection_session_id}\n"
             f"음식: {self.current_food_type}\n\n"
@@ -1863,16 +1897,8 @@ class JetsonIntegratedApp:
 
     def on_close(self):
         """Cleanup and close application - 백그라운드에서 정리"""
-        # messagebox를 위한 최상위 창 생성
-        dialog = tk.Toplevel(self.root)
-        dialog.withdraw()  # 숨기기
-        dialog.attributes('-topmost', True)  # 항상 최상위
-
-        # messagebox를 이 창의 자식으로 표시
-        result = messagebox.askokcancel("종료", "프로그램을 종료하시겠습니까?", parent=dialog)
-        dialog.destroy()
-
-        if result:
+        # Ask for confirmation
+        if askokcancel_topmost("종료", "프로그램을 종료하시겠습니까?"):
             print("[종료] 시스템 종료 중...")
             self.running = False
 

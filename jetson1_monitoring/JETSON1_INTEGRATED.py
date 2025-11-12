@@ -50,6 +50,41 @@ def get_ip_address():
     except:
         return "unknown"
 
+# =========================
+# Popup Helper Functions
+# =========================
+def show_popup_topmost(func, title, message, **kwargs):
+    """Show messagebox always on top"""
+    # Create temporary toplevel window
+    temp = tk.Toplevel()
+    temp.withdraw()
+    temp.attributes('-topmost', True)
+    temp.lift()
+    temp.focus_force()
+
+    try:
+        result = func(title, message, parent=temp, **kwargs)
+    finally:
+        temp.destroy()
+
+    return result
+
+def showinfo_topmost(title, message):
+    """Show info dialog always on top"""
+    return show_popup_topmost(messagebox.showinfo, title, message)
+
+def showwarning_topmost(title, message):
+    """Show warning dialog always on top"""
+    return show_popup_topmost(messagebox.showwarning, title, message)
+
+def showerror_topmost(title, message):
+    """Show error dialog always on top"""
+    return show_popup_topmost(messagebox.showerror, title, message)
+
+def askokcancel_topmost(title, message):
+    """Show ok/cancel dialog always on top"""
+    return show_popup_topmost(messagebox.askokcancel, title, message)
+
 config = load_config()
 
 # Auto-start/down configuration
@@ -655,7 +690,7 @@ class IntegratedMonitorApp:
         self.night_no_person_deadline = None
         self.off_triggered_once = True
         self.auto_detection_label.config(text="감지: 테스트 모드 (스냅샷)", fg=COLOR_WARNING)
-        messagebox.showinfo("테스트 모드", "스냅샷 모드가 즉시 시작되었습니다.\n모션 감지 시 자동 저장됩니다.")
+        showinfo_topmost("테스트 모드", "스냅샷 모드가 즉시 시작되었습니다.\n모션 감지 시 자동 저장됩니다.")
 
     # =========================
     # Initialization
@@ -1622,7 +1657,7 @@ class IntegratedMonitorApp:
         self.stirfry_stop_btn.config(state=tk.DISABLED)
         total_frames = self.stirfry_left_frame_count + self.stirfry_right_frame_count
         print(f"[볶음] 녹화 중지 - 왼쪽: {self.stirfry_left_frame_count}장, 오른쪽: {self.stirfry_right_frame_count}장")
-        messagebox.showinfo("녹화 완료",
+        showinfo_topmost("녹화 완료",
                           f"세션: {self.stirfry_session_id}\n음식: {self.current_stirfry_food_type}\n왼쪽: {self.stirfry_left_frame_count}장\n오른쪽: {self.stirfry_right_frame_count}장\n총: {total_frames}장")
 
     def open_pc_status(self):
@@ -1773,15 +1808,15 @@ class IntegratedMonitorApp:
     def open_settings_delayed(self):
         """Open settings dialog after delay - only if still at 1 tap"""
         if self.shutdown_tap_count <= 1:
-            messagebox.showinfo("설정", "설정 기능은 준비 중입니다.\nconfig.json 파일을 직접 수정하세요.")
+            showinfo_topmost("설정", "설정 기능은 준비 중입니다.\nconfig.json 파일을 직접 수정하세요.")
 
     def open_settings(self):
         """Open settings dialog immediately (for direct calls)"""
-        messagebox.showinfo("설정", "설정 기능은 준비 중입니다.\nconfig.json 파일을 직접 수정하세요.")
+        showinfo_topmost("설정", "설정 기능은 준비 중입니다.\nconfig.json 파일을 직접 수정하세요.")
 
     def confirm_shutdown(self):
         """Confirm shutdown and close"""
-        if messagebox.askokcancel("종료 확인", "정말 시스템을 종료하시겠습니까?"):
+        if askokcancel_topmost("종료 확인", "정말 시스템을 종료하시겠습니까?"):
             self.on_closing()
         else:
             # Cancel - hide shutdown button, show settings again
@@ -1799,16 +1834,8 @@ class IntegratedMonitorApp:
 
     def on_closing(self):
         """Handle window close - 백그라운드에서 정리"""
-        # messagebox를 위한 최상위 창 생성
-        dialog = tk.Toplevel(self.root)
-        dialog.withdraw()  # 숨기기
-        dialog.attributes('-topmost', True)  # 항상 최상위
-
-        # messagebox를 이 창의 자식으로 표시
-        result = messagebox.askokcancel("종료", "프로그램을 종료하시겠습니까?", parent=dialog)
-        dialog.destroy()
-
-        if result:
+        # Ask for confirmation
+        if askokcancel_topmost("종료", "프로그램을 종료하시겠습니까?"):
             print("[종료] 시스템 종료 중...")
             self.running = False
 
