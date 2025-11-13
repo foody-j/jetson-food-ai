@@ -201,11 +201,6 @@ GUI_UPDATE_INTERVAL = config.get('gui_update_interval_ms', 50)
 FRYING_FRAME_SKIP = config.get('frying_frame_skip', 3)
 OBSERVE_FRAME_SKIP = config.get('observe_frame_skip', 5)
 
-# GMSL Driver settings
-GMSL_MODE = config.get('gmsl_mode', 2)
-GMSL_DRIVER_DIR = config.get('gmsl_driver_dir',
-    '/home/dkuyj/jetson-camera-monitor/SG4A-NONX-G2Y-A1_ORIN_NANO_YUV_JP6.2_L4TR36.4.3')
-
 
 # =========================
 # Main Application Class

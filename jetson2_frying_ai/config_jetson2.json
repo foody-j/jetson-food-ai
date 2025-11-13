@@ -53,10 +53,6 @@
   "font_button": 16,
   "// Defaults: window_width=1280, window_height=720, font sizes auto-scaled": "",
 
-  "// GMSL Camera Settings": "",
-  "gmsl_mode": 2,
-  "gmsl_driver_dir": "/home/dkuyj/jetson-camera-monitor/SG4A-NONX-G2Y-A1_ORIN_NANO_YUV_JP6.2_L4TR36.4.3",
-  "// Defaults: gmsl_mode=2": "",
 
   "// MQTT Settings": "",
   "mqtt_enabled": false,

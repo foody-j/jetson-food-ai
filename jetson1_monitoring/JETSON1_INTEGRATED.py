@@ -105,10 +105,6 @@ CAMERA_INDEX = config['camera_index']
 CAMERA_TYPE = config.get('camera_type', 'usb')  # Default to USB if not specified
 CAMERA_RESOLUTION = config.get('camera_resolution', {'width': 640, 'height': 360})
 CAMERA_FPS = config.get('camera_fps', 30)
-GMSL_MODE = config.get('gmsl_mode', 2)
-GMSL_RESOLUTION_MODE = config.get('gmsl_resolution_mode', 1)
-GMSL_DRIVER_DIR = config.get('gmsl_driver_dir',
-    '/home/dkuyj/jetson-camera-monitor/SG4A-NONX-G2Y-A1_ORIN_NANO_YUV_JP6.2_L4TR36.4.3')
 YOLO_CONF = config['yolo_confidence']
 DETECTION_HOLD_SEC = config['detection_hold_sec']
 NIGHT_CHECK_MINUTES = config['night_check_minutes']
@@ -142,14 +138,10 @@ AI_MODE_ENABLED = config.get('ai_mode_enabled', False)
 STIRFRY_LEFT_ENABLED = config.get('stirfry_left_enabled', True)
 STIRFRY_LEFT_CAMERA_TYPE = config.get('stirfry_left_camera_type', 'usb')
 STIRFRY_LEFT_CAMERA_INDEX = config.get('stirfry_left_camera_index', 1)  # Video1 (CN5)
-STIRFRY_LEFT_GMSL_MODE = config.get('stirfry_left_gmsl_mode', 2)
-STIRFRY_LEFT_GMSL_RESOLUTION_MODE = config.get('stirfry_left_gmsl_resolution_mode', 1)
 
 STIRFRY_RIGHT_ENABLED = config.get('stirfry_right_enabled', True)
 STIRFRY_RIGHT_CAMERA_TYPE = config.get('stirfry_right_camera_type', 'usb')
 STIRFRY_RIGHT_CAMERA_INDEX = config.get('stirfry_right_camera_index', 2)  # Video2 (CN6)
-STIRFRY_RIGHT_GMSL_MODE = config.get('stirfry_right_gmsl_mode', 2)
-STIRFRY_RIGHT_GMSL_RESOLUTION_MODE = config.get('stirfry_right_gmsl_resolution_mode', 1)
 
 STIRFRY_SAVE_DIR = config.get('stirfry_save_dir', 'StirFry_Data')
 
