@@ -230,8 +230,8 @@ mosquitto_pub -h localhost -t "frying/pot2/control" -m "stop"
 
 ---
 
-#### 5. `frying/oil_temp/left`
-**목적**: 왼쪽 솥의 기름 온도 수신
+#### 5. `frying/pot1/oil_temp`
+**목적**: POT1의 기름 온도 수신
 
 **메시지 형식**: 실수 (섭씨)
 ```
@@ -239,25 +239,12 @@ mosquitto_pub -h localhost -t "frying/pot2/control" -m "stop"
 "180.0"
 ```
 
-**동작**: 수집 활성화 시 메타데이터에 저장됨
+**동작**: POT1 수집 활성화 시 POT1 메타데이터에 저장됨
 
 ---
 
-#### 6. `frying/oil_temp/right`
-**목적**: 오른쪽 솥의 기름 온도 수신
-
-**메시지 형식**: 실수 (섭씨)
-```
-"170.2"
-"185.0"
-```
-
-**동작**: 수집 활성화 시 메타데이터에 저장됨
-
----
-
-#### 7. `frying/probe_temp/left`
-**목적**: 왼쪽 솥의 탐침(음식 중심부) 온도 수신
+#### 6. `frying/pot1/probe_temp`
+**목적**: POT1의 탐침(음식 중심부) 온도 수신
 
 **메시지 형식**: 실수 (섭씨)
 ```
@@ -266,13 +253,26 @@ mosquitto_pub -h localhost -t "frying/pot2/control" -m "stop"
 ```
 
 **동작**:
-- 수집 활성화 시 메타데이터에 저장됨
-- 75.0°C 이상일 때 자동 완료 마킹 (목표 온도)
+- POT1 수집 활성화 시 POT1 메타데이터에 저장됨
+- 75.0°C 이상일 때 POT1 자동 완료 마킹 (목표 온도)
 
 ---
 
-#### 8. `frying/probe_temp/right`
-**목적**: 오른쪽 솥의 탐침(음식 중심부) 온도 수신
+#### 7. `frying/pot2/oil_temp`
+**목적**: POT2의 기름 온도 수신
+
+**메시지 형식**: 실수 (섭씨)
+```
+"170.2"
+"185.0"
+```
+
+**동작**: POT2 수집 활성화 시 POT2 메타데이터에 저장됨
+
+---
+
+#### 8. `frying/pot2/probe_temp`
+**목적**: POT2의 탐침(음식 중심부) 온도 수신
 
 **메시지 형식**: 실수 (섭씨)
 ```
@@ -281,8 +281,8 @@ mosquitto_pub -h localhost -t "frying/pot2/control" -m "stop"
 ```
 
 **동작**:
-- 수집 활성화 시 메타데이터에 저장됨
-- 75.0°C 이상일 때 자동 완료 마킹 (목표 온도)
+- POT2 수집 활성화 시 POT2 메타데이터에 저장됨
+- 75.0°C 이상일 때 POT2 자동 완료 마킹 (목표 온도)
 
 ---
 
@@ -530,10 +530,10 @@ sequenceDiagram
   "mqtt_topic_frying_pot1_control": "frying/pot1/control",
   "mqtt_topic_frying_pot2_food_type": "frying/pot2/food_type",
   "mqtt_topic_frying_pot2_control": "frying/pot2/control",
-  "mqtt_topic_oil_temp_left": "frying/oil_temp/left",
-  "mqtt_topic_oil_temp_right": "frying/oil_temp/right",
-  "mqtt_topic_probe_temp_left": "frying/probe_temp/left",
-  "mqtt_topic_probe_temp_right": "frying/probe_temp/right",
+  "mqtt_topic_pot1_oil_temp": "frying/pot1/oil_temp",
+  "mqtt_topic_pot1_probe_temp": "frying/pot1/probe_temp",
+  "mqtt_topic_pot2_oil_temp": "frying/pot2/oil_temp",
+  "mqtt_topic_pot2_probe_temp": "frying/pot2/probe_temp",
   "mqtt_qos": 1,
   "mqtt_client_id": "jetson2_ai",
   "mqtt_publish_interval": 2,
@@ -624,12 +624,12 @@ mosquitto_sub -h localhost -t "#" -v
 
 # 터미널 2: 명령 전송
 mosquitto_pub -h localhost -t "frying/pot1/food_type" -m "chicken"
-mosquitto_pub -h localhost -t "frying/oil_temp/left" -m "165.5"
-mosquitto_pub -h localhost -t "frying/probe_temp/left" -m "45.0"
+mosquitto_pub -h localhost -t "frying/pot1/oil_temp" -m "165.5"
+mosquitto_pub -h localhost -t "frying/pot1/probe_temp" -m "45.0"
 
 # 잠시 대기
 sleep 2
-mosquitto_pub -h localhost -t "frying/probe_temp/left" -m "75.5"  # 자동 완료 마킹
+mosquitto_pub -h localhost -t "frying/pot1/probe_temp" -m "75.5"  # 자동 완료 마킹
 
 # 중지
 mosquitto_pub -h localhost -t "frying/pot1/control" -m "stop"
@@ -752,10 +752,10 @@ cat config.json | grep frame_skip
 
 | 토픽 | 목적 | 형식 |
 |------|------|------|
-| `frying/oil_temp/left` | 왼쪽 솥 기름 온도 | `"165.5"` |
-| `frying/oil_temp/right` | 오른쪽 솥 기름 온도 | `"170.0"` |
-| `frying/probe_temp/left` | 왼쪽 솥 음식 중심 온도 | `"75.0"` |
-| `frying/probe_temp/right` | 오른쪽 솥 음식 중심 온도 | `"75.5"` |
+| `frying/pot1/oil_temp` | POT1 기름 온도 | `"165.5"` |
+| `frying/pot1/probe_temp` | POT1 음식 중심 온도 | `"75.0"` |
+| `frying/pot2/oil_temp` | POT2 기름 온도 | `"170.0"` |
+| `frying/pot2/probe_temp` | POT2 음식 중심 온도 | `"75.5"` |
 
 ---
 

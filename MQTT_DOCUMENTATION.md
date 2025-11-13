@@ -230,8 +230,8 @@ mosquitto_pub -h localhost -t "frying/pot2/control" -m "stop"
 
 ---
 
-#### 5. `frying/oil_temp/left`
-**Purpose**: Receive oil temperature from left pot
+#### 5. `frying/pot1/oil_temp`
+**Purpose**: Receive oil temperature from POT1
 
 **Message Format**: Float number (Celsius)
 ```
@@ -239,25 +239,12 @@ mosquitto_pub -h localhost -t "frying/pot2/control" -m "stop"
 "180.0"
 ```
 
-**Behavior**: Stored in metadata if collection is active
+**Behavior**: Stored in POT1 metadata if POT1 collection is active
 
 ---
 
-#### 6. `frying/oil_temp/right`
-**Purpose**: Receive oil temperature from right pot
-
-**Message Format**: Float number (Celsius)
-```
-"170.2"
-"185.0"
-```
-
-**Behavior**: Stored in metadata if collection is active
-
----
-
-#### 7. `frying/probe_temp/left`
-**Purpose**: Receive probe (food core) temperature from left pot
+#### 6. `frying/pot1/probe_temp`
+**Purpose**: Receive probe (food core) temperature from POT1
 
 **Message Format**: Float number (Celsius)
 ```
@@ -266,13 +253,26 @@ mosquitto_pub -h localhost -t "frying/pot2/control" -m "stop"
 ```
 
 **Behavior**:
-- Stored in metadata if collection is active
-- Auto-mark completion when >= 75.0°C (target temperature)
+- Stored in POT1 metadata if POT1 collection is active
+- Auto-mark POT1 completion when >= 75.0°C (target temperature)
 
 ---
 
-#### 8. `frying/probe_temp/right`
-**Purpose**: Receive probe (food core) temperature from right pot
+#### 7. `frying/pot2/oil_temp`
+**Purpose**: Receive oil temperature from POT2
+
+**Message Format**: Float number (Celsius)
+```
+"170.2"
+"185.0"
+```
+
+**Behavior**: Stored in POT2 metadata if POT2 collection is active
+
+---
+
+#### 8. `frying/pot2/probe_temp`
+**Purpose**: Receive probe (food core) temperature from POT2
 
 **Message Format**: Float number (Celsius)
 ```
@@ -281,8 +281,8 @@ mosquitto_pub -h localhost -t "frying/pot2/control" -m "stop"
 ```
 
 **Behavior**:
-- Stored in metadata if collection is active
-- Auto-mark completion when >= 75.0°C (target temperature)
+- Stored in POT2 metadata if POT2 collection is active
+- Auto-mark POT2 completion when >= 75.0°C (target temperature)
 
 ---
 
@@ -530,10 +530,10 @@ sequenceDiagram
   "mqtt_topic_frying_pot1_control": "frying/pot1/control",
   "mqtt_topic_frying_pot2_food_type": "frying/pot2/food_type",
   "mqtt_topic_frying_pot2_control": "frying/pot2/control",
-  "mqtt_topic_oil_temp_left": "frying/oil_temp/left",
-  "mqtt_topic_oil_temp_right": "frying/oil_temp/right",
-  "mqtt_topic_probe_temp_left": "frying/probe_temp/left",
-  "mqtt_topic_probe_temp_right": "frying/probe_temp/right",
+  "mqtt_topic_pot1_oil_temp": "frying/pot1/oil_temp",
+  "mqtt_topic_pot1_probe_temp": "frying/pot1/probe_temp",
+  "mqtt_topic_pot2_oil_temp": "frying/pot2/oil_temp",
+  "mqtt_topic_pot2_probe_temp": "frying/pot2/probe_temp",
   "mqtt_qos": 1,
   "mqtt_client_id": "jetson2_ai",
   "mqtt_publish_interval": 2,
@@ -624,12 +624,12 @@ mosquitto_sub -h localhost -t "#" -v
 
 # Terminal 2: Send commands
 mosquitto_pub -h localhost -t "frying/pot1/food_type" -m "chicken"
-mosquitto_pub -h localhost -t "frying/oil_temp/left" -m "165.5"
-mosquitto_pub -h localhost -t "frying/probe_temp/left" -m "45.0"
+mosquitto_pub -h localhost -t "frying/pot1/oil_temp" -m "165.5"
+mosquitto_pub -h localhost -t "frying/pot1/probe_temp" -m "45.0"
 
 # Wait a bit
 sleep 2
-mosquitto_pub -h localhost -t "frying/probe_temp/left" -m "75.5"  # Auto-mark completion
+mosquitto_pub -h localhost -t "frying/pot1/probe_temp" -m "75.5"  # Auto-mark completion
 
 # Stop
 mosquitto_pub -h localhost -t "frying/pot1/control" -m "stop"
@@ -752,10 +752,10 @@ cat config.json | grep frame_skip
 
 | Topic | Purpose | Format |
 |-------|---------|--------|
-| `frying/oil_temp/left` | Left pot oil temp | `"165.5"` |
-| `frying/oil_temp/right` | Right pot oil temp | `"170.0"` |
-| `frying/probe_temp/left` | Left pot food core temp | `"75.0"` |
-| `frying/probe_temp/right` | Right pot food core temp | `"75.5"` |
+| `frying/pot1/oil_temp` | POT1 oil temp | `"165.5"` |
+| `frying/pot1/probe_temp` | POT1 food core temp | `"75.0"` |
+| `frying/pot2/oil_temp` | POT2 oil temp | `"170.0"` |
+| `frying/pot2/probe_temp` | POT2 food core temp | `"75.5"` |
 
 ---
 

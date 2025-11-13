@@ -140,10 +140,10 @@ MQTT_TOPIC_OBSERVE = f"{DEVICE_ID}/" + config.get('mqtt_topic_observe', 'observe
 MQTT_TOPIC_SYSTEM_AI_MODE = config.get('mqtt_topic_ai_mode', f"{DEVICE_ID}/system/ai_mode")
 MQTT_TOPIC_FRYING_COMPLETION = f"{DEVICE_ID}/frying/completion"
 # Subscribed topics (no prefix - shared from robot)
-MQTT_TOPIC_OIL_TEMP_LEFT = config.get('mqtt_topic_oil_temp_left', 'frying/oil_temp/left')
-MQTT_TOPIC_OIL_TEMP_RIGHT = config.get('mqtt_topic_oil_temp_right', 'frying/oil_temp/right')
-MQTT_TOPIC_PROBE_TEMP_LEFT = config.get('mqtt_topic_probe_temp_left', 'frying/probe_temp/left')
-MQTT_TOPIC_PROBE_TEMP_RIGHT = config.get('mqtt_topic_probe_temp_right', 'frying/probe_temp/right')
+MQTT_TOPIC_POT1_OIL_TEMP = config.get('mqtt_topic_pot1_oil_temp', 'frying/pot1/oil_temp')
+MQTT_TOPIC_POT1_PROBE_TEMP = config.get('mqtt_topic_pot1_probe_temp', 'frying/pot1/probe_temp')
+MQTT_TOPIC_POT2_OIL_TEMP = config.get('mqtt_topic_pot2_oil_temp', 'frying/pot2/oil_temp')
+MQTT_TOPIC_POT2_PROBE_TEMP = config.get('mqtt_topic_pot2_probe_temp', 'frying/pot2/probe_temp')
 MQTT_TOPIC_FOOD_TYPE = config.get('mqtt_topic_food_type', 'frying/food_type')
 MQTT_TOPIC_FRYING_CONTROL = config.get('mqtt_topic_frying_control', 'frying/control')
 # POT1/POT2 Separate Control Topics (subscribed by Jetson)
@@ -406,11 +406,11 @@ class JetsonIntegratedApp:
                 client_id=MQTT_CLIENT_ID
             )
 
-            # Subscribe to temperature topics
-            self.mqtt_client.subscribe(MQTT_TOPIC_OIL_TEMP_LEFT, self.on_oil_temp_left)
-            self.mqtt_client.subscribe(MQTT_TOPIC_OIL_TEMP_RIGHT, self.on_oil_temp_right)
-            self.mqtt_client.subscribe(MQTT_TOPIC_PROBE_TEMP_LEFT, self.on_probe_temp_left)
-            self.mqtt_client.subscribe(MQTT_TOPIC_PROBE_TEMP_RIGHT, self.on_probe_temp_right)
+            # Subscribe to temperature topics (POT1/POT2)
+            self.mqtt_client.subscribe(MQTT_TOPIC_POT1_OIL_TEMP, self.on_pot1_oil_temp)
+            self.mqtt_client.subscribe(MQTT_TOPIC_POT1_PROBE_TEMP, self.on_pot1_probe_temp)
+            self.mqtt_client.subscribe(MQTT_TOPIC_POT2_OIL_TEMP, self.on_pot2_oil_temp)
+            self.mqtt_client.subscribe(MQTT_TOPIC_POT2_PROBE_TEMP, self.on_pot2_probe_temp)
 
             # Subscribe to food type topic (LEGACY)
             self.mqtt_client.subscribe(MQTT_TOPIC_FOOD_TYPE, self.on_food_type)
@@ -429,11 +429,15 @@ class JetsonIntegratedApp:
             print(f"[MQTT] 연결 성공: {MQTT_BROKER}:{MQTT_PORT}")
             print(f"[MQTT] Device: {DEVICE_ID} ({DEVICE_NAME}) @ {get_ip_address()}")
             print(f"[MQTT] 구독 토픽 (로봇→Jetson):")
-            print(f"  - {MQTT_TOPIC_OIL_TEMP_LEFT}")
-            print(f"  - {MQTT_TOPIC_OIL_TEMP_RIGHT}")
-            print(f"  - {MQTT_TOPIC_PROBE_TEMP_LEFT}")
-            print(f"  - {MQTT_TOPIC_PROBE_TEMP_RIGHT}")
-            print(f"  - {MQTT_TOPIC_FOOD_TYPE}")
+            print(f"  - {MQTT_TOPIC_POT1_OIL_TEMP}")
+            print(f"  - {MQTT_TOPIC_POT1_PROBE_TEMP}")
+            print(f"  - {MQTT_TOPIC_POT2_OIL_TEMP}")
+            print(f"  - {MQTT_TOPIC_POT2_PROBE_TEMP}")
+            print(f"  - {MQTT_TOPIC_FRYING_POT1_FOOD_TYPE}")
+            print(f"  - {MQTT_TOPIC_FRYING_POT1_CONTROL}")
+            print(f"  - {MQTT_TOPIC_FRYING_POT2_FOOD_TYPE}")
+            print(f"  - {MQTT_TOPIC_FRYING_POT2_CONTROL}")
+            print(f"  - {MQTT_TOPIC_FOOD_TYPE} (LEGACY)")
             print(f"  - calibration/vibration/control")
             print(f"[MQTT] 발행 토픽 (Jetson→로봇):")
             print(f"  - {MQTT_TOPIC_OBSERVE}")
@@ -449,12 +453,22 @@ class JetsonIntegratedApp:
             print(f"[MQTT] 연결 실패: {e}")
             self.mqtt_client = None
 
-    def on_oil_temp_left(self, client, userdata, message):
-        """MQTT callback for left oil temperature"""
+    def on_pot1_oil_temp(self, client, userdata, message):
+        """MQTT callback for POT1 oil temperature"""
         try:
             self.oil_temp_left = float(message.payload.decode())
 
-            # Store metadata during data collection
+            # Store metadata during POT1 data collection
+            if self.pot1_collecting:
+                from datetime import datetime
+                self.pot1_metadata.append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                    "type": "oil_temperature",
+                    "pot": "pot1",
+                    "value": self.oil_temp_left,
+                    "unit": "celsius"
+                })
+            # LEGACY: Also store in legacy collection
             if self.data_collection_active:
                 from datetime import datetime
                 self.collection_metadata.append({
@@ -467,12 +481,22 @@ class JetsonIntegratedApp:
         except:
             pass
 
-    def on_oil_temp_right(self, client, userdata, message):
-        """MQTT callback for right oil temperature"""
+    def on_pot2_oil_temp(self, client, userdata, message):
+        """MQTT callback for POT2 oil temperature"""
         try:
             self.oil_temp_right = float(message.payload.decode())
 
-            # Store metadata during data collection
+            # Store metadata during POT2 data collection
+            if self.pot2_collecting:
+                from datetime import datetime
+                self.pot2_metadata.append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                    "type": "oil_temperature",
+                    "pot": "pot2",
+                    "value": self.oil_temp_right,
+                    "unit": "celsius"
+                })
+            # LEGACY: Also store in legacy collection
             if self.data_collection_active:
                 from datetime import datetime
                 self.collection_metadata.append({
@@ -485,12 +509,36 @@ class JetsonIntegratedApp:
         except:
             pass
 
-    def on_probe_temp_left(self, client, userdata, message):
-        """MQTT callback for left probe temperature"""
+    def on_pot1_probe_temp(self, client, userdata, message):
+        """MQTT callback for POT1 probe temperature"""
         try:
             self.probe_temp_left = float(message.payload.decode())
 
-            # Store metadata during data collection
+            # Store metadata during POT1 data collection
+            if self.pot1_collecting:
+                from datetime import datetime
+                self.pot1_metadata.append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                    "type": "probe_temperature",
+                    "pot": "pot1",
+                    "value": self.probe_temp_left,
+                    "unit": "celsius"
+                })
+
+                # Auto-mark completion if target temperature reached
+                if not self.pot1_completion_marked and self.probe_temp_left >= TARGET_PROBE_TEMP:
+                    print(f"[POT1] 목표 온도 도달: {self.probe_temp_left}°C")
+                    self.pot1_completion_marked = True
+                    self.pot1_completion_time = datetime.now()
+                    self.pot1_completion_info = {
+                        "method": f"auto (probe_temp >= {TARGET_PROBE_TEMP}°C)",
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "probe_temp": self.probe_temp_left,
+                        "oil_temp": self.oil_temp_left,
+                        "elapsed_time_sec": (datetime.now() - self.pot1_start_time).total_seconds() if self.pot1_start_time else 0
+                    }
+
+            # LEGACY: Also store in legacy collection
             if self.data_collection_active:
                 from datetime import datetime
                 self.collection_metadata.append({
@@ -500,19 +548,41 @@ class JetsonIntegratedApp:
                     "value": self.probe_temp_left,
                     "unit": "celsius"
                 })
-
-                # Auto-mark completion if target temperature reached
                 if not self.collection_completion_marked and self.probe_temp_left >= TARGET_PROBE_TEMP:
                     self.mark_completion_auto("left", self.probe_temp_left)
         except:
             pass
 
-    def on_probe_temp_right(self, client, userdata, message):
-        """MQTT callback for right probe temperature"""
+    def on_pot2_probe_temp(self, client, userdata, message):
+        """MQTT callback for POT2 probe temperature"""
         try:
             self.probe_temp_right = float(message.payload.decode())
 
-            # Store metadata during data collection
+            # Store metadata during POT2 data collection
+            if self.pot2_collecting:
+                from datetime import datetime
+                self.pot2_metadata.append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                    "type": "probe_temperature",
+                    "pot": "pot2",
+                    "value": self.probe_temp_right,
+                    "unit": "celsius"
+                })
+
+                # Auto-mark completion if target temperature reached
+                if not self.pot2_completion_marked and self.probe_temp_right >= TARGET_PROBE_TEMP:
+                    print(f"[POT2] 목표 온도 도달: {self.probe_temp_right}°C")
+                    self.pot2_completion_marked = True
+                    self.pot2_completion_time = datetime.now()
+                    self.pot2_completion_info = {
+                        "method": f"auto (probe_temp >= {TARGET_PROBE_TEMP}°C)",
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "probe_temp": self.probe_temp_right,
+                        "oil_temp": self.oil_temp_right,
+                        "elapsed_time_sec": (datetime.now() - self.pot2_start_time).total_seconds() if self.pot2_start_time else 0
+                    }
+
+            # LEGACY: Also store in legacy collection
             if self.data_collection_active:
                 from datetime import datetime
                 self.collection_metadata.append({
@@ -522,8 +592,6 @@ class JetsonIntegratedApp:
                     "value": self.probe_temp_right,
                     "unit": "celsius"
                 })
-
-                # Auto-mark completion if target temperature reached
                 if not self.collection_completion_marked and self.probe_temp_right >= TARGET_PROBE_TEMP:
                     self.mark_completion_auto("right", self.probe_temp_right)
         except:
