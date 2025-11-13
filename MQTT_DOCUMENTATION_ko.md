@@ -139,6 +139,29 @@ mosquitto_pub -h localhost -t "stirfry/pot2/control" -m "stop"
 
 ---
 
+### SSR/GPIO 제어 (젯슨 1 전용)
+
+**하드웨어**: GPIO 핀 7번 (BOARD 모드)이 SSR 릴레이를 제어하여 로봇 PC 전원을 ON/OFF
+
+**주간 모드 로직** (07:30 - 19:30, `day_start`/`day_end`로 설정 가능):
+1. 사람 **2초 감지** (YOLO) → GPIO HIGH (SSR ON) → 로봇 PC 켜짐
+2. MQTT "robot/control" → "ON" 발행
+3. **야간 모드 전환까지 SSR 계속 ON 유지** (한 번 켜지면 야간까지 유지)
+
+**야간 모드 로직** (19:30 - 07:30):
+1. 19:30에 야간 모드로 전환
+2. **10분간 사람 없음** (`night_check_minutes`로 설정 가능) → GPIO LOW (SSR OFF) → 로봇 PC 꺼짐
+3. MQTT "robot/control" → "OFF" 발행
+4. SSR OFF 이후 모션 감지 시 스냅샷만 저장 (GPIO 제어 안 함)
+
+**중요 사항**:
+- 감지 임계값: 2초 (`detection_hold_sec`로 설정 가능)
+- 야간 체크 타임아웃: 10분 (`night_check_minutes`로 설정 가능)
+- SSR 제어는 MQTT와 독립적으로 동작 (동시 실행)
+- 하드웨어 설정은 `GPIO_SSR_연결가이드.md` 참조
+
+---
+
 ## 젯슨 2 (튀김 스테이션) 토픽
 
 ### 구독 토픽 (로봇 PC → 젯슨 2)

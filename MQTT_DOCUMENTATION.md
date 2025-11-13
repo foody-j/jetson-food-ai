@@ -139,6 +139,29 @@ mosquitto_pub -h localhost -t "stirfry/pot2/control" -m "stop"
 
 ---
 
+### SSR/GPIO Control (Jetson 1 Only)
+
+**Hardware**: GPIO Pin 7 (BOARD mode) controls SSR relay to power Robot PC on/off
+
+**Day Mode Logic** (07:30 - 19:30, configurable via `day_start`/`day_end`):
+1. Person detected for **2 seconds** (YOLO) → GPIO HIGH (SSR ON) → Robot PC powers on
+2. MQTT publishes "robot/control" → "ON"
+3. **SSR stays ON until night mode** (once triggered, remains on)
+
+**Night Mode Logic** (19:30 - 07:30):
+1. Switches to night mode at 19:30
+2. **No person detected for 10 minutes** (configurable via `night_check_minutes`) → GPIO LOW (SSR OFF) → Robot PC powers off
+3. MQTT publishes "robot/control" → "OFF"
+4. After SSR OFF, motion detection saves snapshots only (no GPIO control)
+
+**Important Notes**:
+- Detection threshold: 2 seconds (configurable via `detection_hold_sec`)
+- Night check timeout: 10 minutes (configurable via `night_check_minutes`)
+- SSR control is independent of MQTT (both execute simultaneously)
+- See `GPIO_SSR_연결가이드.md` for hardware setup
+
+---
+
 ## Jetson 2 (Frying Station) Topics
 
 ### Subscribed Topics (From Robot PC → Jetson 2)

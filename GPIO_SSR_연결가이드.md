@@ -189,12 +189,16 @@ sudo chmod 220 /sys/class/gpio/export /sys/class/gpio/unexport
 ```
 
 ### 4.2 동작 로직
-1. **주간 모드** (07:30 ~ 14:00)
-   - 사람 감지 → GPIO HIGH (릴레이 ON) → 로봇 PC 켜짐
-   - 30초간 사람 없음 → GPIO LOW (릴레이 OFF)
 
-2. **야간 모드** (14:00 ~ 07:30)
-   - GPIO 동작 안 함 (설정으로 변경 가능)
+**실제 구현된 로직:**
+
+1. **주간 모드** (07:30 ~ 19:30, config.json의 day_start/day_end)
+   - 사람 **2초 감지** (YOLO) → GPIO HIGH (SSR ON) → 로봇 PC 켜짐 + MQTT "ON" 전송
+   - **야간 모드 전환까지 SSR 계속 ON 유지** (한 번 켜지면 야간까지 유지)
+
+2. **야간 모드** (19:30 ~ 07:30)
+   - **10분간 사람 없음** (config.json의 night_check_minutes) → GPIO LOW (SSR OFF) → 로봇 PC 꺼짐 + MQTT "OFF" 전송
+   - 이후 모션 감지 시 스냅샷만 저장 (GPIO 제어 안 함)
 
 ## 5. 안전 주의사항
 

@@ -1204,7 +1204,8 @@ class IntegratedMonitorApp:
             else:
                 if self.night_no_person_deadline is not None:
                     remain = int((self.night_no_person_deadline - now).total_seconds())
-                    self.auto_detection_label.config(text=f"감지: {remain}초 남음", fg=COLOR_INFO)
+                    if remain >= 0:
+                        self.auto_detection_label.config(text=f"감지: {remain}초 남음", fg=COLOR_INFO)
         else:
             # Stage 2: Motion detection
             if self.frame_idx > WARMUP_FRAMES:
