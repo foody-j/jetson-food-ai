@@ -522,10 +522,18 @@ class IntegratedMonitorApp:
                                        bg=COLOR_PANEL, fg=COLOR_WARNING, anchor="w")
         self.auto_mqtt_label.grid(row=1, column=1, sticky="w", padx=5, pady=2)
 
-        # Camera preview area (more space now) - 축소
-        self.auto_preview_label = tk.Label(panel, text="[카메라 로딩 중...]",
+        # Camera preview area with camera number overlay
+        preview_container = tk.Frame(panel, bg="black")
+        preview_container.pack(pady=5, padx=5, fill=tk.BOTH, expand=True)
+
+        self.auto_preview_label = tk.Label(preview_container, text="[카메라 로딩 중...]",
                                           bg="black", fg="white", font=NORMAL_FONT)
-        self.auto_preview_label.pack(pady=5, padx=5, fill=tk.BOTH, expand=True)
+        self.auto_preview_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # Camera number label (top-right)
+        self.auto_cam_number_label = tk.Label(preview_container, text="Cam 3",
+                                              bg="black", fg="yellow", font=("Noto Sans CJK KR", 10, "bold"))
+        self.auto_cam_number_label.place(relx=1.0, rely=0, x=-5, y=5, anchor="ne")
 
     def create_stirfry_left_panel(self, parent):
         """Panel 2: Stir-fry monitoring LEFT - ROW 1, LEFT - 세로 모드 최적화"""
@@ -544,7 +552,12 @@ class IntegratedMonitorApp:
 
         self.stirfry_left_preview_label = tk.Label(preview_container, text="[카메라 로딩 중...]",
                                                    bg="black", fg="white", font=NORMAL_FONT)
-        self.stirfry_left_preview_label.pack(fill=tk.BOTH, expand=True)
+        self.stirfry_left_preview_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # Camera number label (top-right)
+        self.stirfry_left_cam_number_label = tk.Label(preview_container, text="Cam 0",
+                                                      bg="black", fg="yellow", font=("Noto Sans CJK KR", 10, "bold"))
+        self.stirfry_left_cam_number_label.place(relx=1.0, rely=0, x=-5, y=5, anchor="ne")
 
         # Status info - 축소
         info_frame = tk.Frame(panel, bg=COLOR_PANEL)
@@ -572,7 +585,12 @@ class IntegratedMonitorApp:
 
         self.stirfry_right_preview_label = tk.Label(preview_container, text="[카메라 로딩 중...]",
                                                     bg="black", fg="white", font=NORMAL_FONT)
-        self.stirfry_right_preview_label.pack(fill=tk.BOTH, expand=True)
+        self.stirfry_right_preview_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # Camera number label (top-right)
+        self.stirfry_right_cam_number_label = tk.Label(preview_container, text="Cam 1",
+                                                       bg="black", fg="yellow", font=("Noto Sans CJK KR", 10, "bold"))
+        self.stirfry_right_cam_number_label.place(relx=1.0, rely=0, x=-5, y=5, anchor="ne")
 
         # Status info - 축소
         info_frame = tk.Frame(panel, bg=COLOR_PANEL)
@@ -1277,10 +1295,6 @@ class IntegratedMonitorApp:
     def update_auto_preview(self, frame):
         """Update auto system preview with auto-zoom and auto-hide"""
         try:
-            # Add camera number indicator (small, top-left)
-            cv2.putText(frame, "Cam 3", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
-
             # Option 3: Check if preview should be shown
             should_show = self.should_show_preview("auto")
 
@@ -1322,10 +1336,6 @@ class IntegratedMonitorApp:
     def update_stirfry_left_preview(self, frame):
         """Update stir-fry LEFT camera preview with auto-zoom and auto-hide"""
         try:
-            # Add camera number indicator (small, top-left)
-            cv2.putText(frame, "Cam 0", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
-
             # Option 3: Check if preview should be shown (only when recording)
             should_show = self.should_show_preview("stirfry_left")
 
@@ -1391,10 +1401,6 @@ class IntegratedMonitorApp:
     def update_stirfry_right_preview(self, frame):
         """Update stir-fry RIGHT camera preview with auto-zoom and auto-hide"""
         try:
-            # Add camera number indicator (small, top-left)
-            cv2.putText(frame, "Cam 1", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
-
             # Option 3: Check if preview should be shown (only when recording)
             should_show = self.should_show_preview("stirfry_right")
 

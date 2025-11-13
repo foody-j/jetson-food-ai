@@ -693,7 +693,12 @@ class JetsonIntegratedApp:
         preview_container.pack_propagate(False)
 
         self.frying_left_label = tk.Label(preview_container, bg="black")
-        self.frying_left_label.pack(expand=True)
+        self.frying_left_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # Camera number label (top-right)
+        self.frying_left_cam_number_label = tk.Label(preview_container, text="Cam 0",
+                                                     bg="black", fg="yellow", font=("Noto Sans CJK KR", 10, "bold"))
+        self.frying_left_cam_number_label.place(relx=1.0, rely=0, x=-5, y=5, anchor="ne")
 
         # Info frame (temperature + color features) - 축소
         info_frame = tk.Frame(panel, bg=COLOR_PANEL)
@@ -739,7 +744,12 @@ class JetsonIntegratedApp:
         preview_container.pack_propagate(False)
 
         self.frying_right_label = tk.Label(preview_container, bg="black")
-        self.frying_right_label.pack(expand=True)
+        self.frying_right_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # Camera number label (top-right)
+        self.frying_right_cam_number_label = tk.Label(preview_container, text="Cam 1",
+                                                      bg="black", fg="yellow", font=("Noto Sans CJK KR", 10, "bold"))
+        self.frying_right_cam_number_label.place(relx=1.0, rely=0, x=-5, y=5, anchor="ne")
 
         # Info frame (temperature + color features) - 축소
         info_frame = tk.Frame(panel, bg=COLOR_PANEL)
@@ -785,7 +795,12 @@ class JetsonIntegratedApp:
         preview_container.pack_propagate(False)
 
         self.observe_left_label = tk.Label(preview_container, bg="black")
-        self.observe_left_label.pack(expand=True)
+        self.observe_left_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # Camera number label (top-right)
+        self.observe_left_cam_number_label = tk.Label(preview_container, text="Cam 2",
+                                                      bg="black", fg="yellow", font=("Noto Sans CJK KR", 10, "bold"))
+        self.observe_left_cam_number_label.place(relx=1.0, rely=0, x=-5, y=5, anchor="ne")
 
         # Status
         self.observe_left_status = tk.Label(
@@ -809,7 +824,12 @@ class JetsonIntegratedApp:
         preview_container.pack_propagate(False)
 
         self.observe_right_label = tk.Label(preview_container, bg="black")
-        self.observe_right_label.pack(expand=True)
+        self.observe_right_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # Camera number label (top-right)
+        self.observe_right_cam_number_label = tk.Label(preview_container, text="Cam 3",
+                                                       bg="black", fg="yellow", font=("Noto Sans CJK KR", 10, "bold"))
+        self.observe_right_cam_number_label.place(relx=1.0, rely=0, x=-5, y=5, anchor="ne")
 
         # Status
         self.observe_right_status = tk.Label(
@@ -1060,10 +1080,6 @@ class JetsonIntegratedApp:
         if ret:
             vis = frame.copy()
 
-            # Add camera number indicator (small, top-left)
-            cv2.putText(vis, "Cam 0", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
-
             if self.frying_running:
                 # Frame skip: AI 처리는 N프레임마다 (CPU 절약)
                 self.frying_frame_skip += 1
@@ -1165,10 +1181,6 @@ class JetsonIntegratedApp:
         if ret:
             vis = frame.copy()
 
-            # Add camera number indicator (small, top-left)
-            cv2.putText(vis, "Cam 1", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
-
             if self.frying_running:
                 # Frame skip은 왼쪽과 공유 (같은 카운터)
                 if self.frying_frame_skip == 0:  # 왼쪽에서 리셋된 경우
@@ -1267,10 +1279,6 @@ class JetsonIntegratedApp:
         if ret:
             vis = frame.copy()
             H, W = frame.shape[:2]
-
-            # Add camera number indicator (small, top-left)
-            cv2.putText(vis, "Cam 2", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
 
             if self.observe_running:
                 # Frame skip: YOLO는 매우 무거움 (config로 조정)
@@ -1412,10 +1420,6 @@ class JetsonIntegratedApp:
         if ret:
             vis = frame.copy()
             H, W = frame.shape[:2]
-
-            # Add camera number indicator (small, top-left)
-            cv2.putText(vis, "Cam 3", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
 
             if self.observe_running:
                 # Frame skip은 왼쪽과 공유 (같은 카운터)
