@@ -134,6 +134,7 @@ MQTT_TOPIC_STIRFRY_STATUS = f"{DEVICE_ID}/stirfry/status"
 MQTT_TOPIC = config.get('mqtt_topic', 'robot/control')  # Legacy topic (robot control)
 MQTT_QOS = config.get('mqtt_qos', 1)
 MQTT_CLIENT_ID = config.get('mqtt_client_id', 'robotcam_jetson')
+MQTT_PUBLISH_INTERVAL = config.get('mqtt_publish_interval', 5)  # seconds
 # AI Mode Setting
 AI_MODE_ENABLED = config.get('ai_mode_enabled', False)
 
@@ -256,6 +257,7 @@ class IntegratedMonitorApp:
 
         # Subprocess tracking (진동센서 등)
         self.child_processes = []
+        self.vibration_process = None  # 진동센서 프로세스 추적
 
         # Recording state
         self.stirfry_recording = False
@@ -321,6 +323,10 @@ class IntegratedMonitorApp:
         self.update_auto_system()
         self.update_stirfry_left_camera()
         self.update_stirfry_right_camera()
+
+        # Start periodic MQTT publishing
+        if MQTT_ENABLED:
+            self.publish_mqtt_periodic()
 
         print("[초기화] 모든 시스템 초기화 완료!")
 
@@ -767,12 +773,16 @@ class IntegratedMonitorApp:
             self.mqtt_client.subscribe(MQTT_TOPIC_STIRFRY_FOOD_TYPE, self.on_stirfry_food_type)
             self.mqtt_client.subscribe(MQTT_TOPIC_STIRFRY_CONTROL, self.on_stirfry_control)
 
+            # Subscribe to vibration control topic
+            self.mqtt_client.subscribe("calibration/vibration/control", self.on_vibration_control)
+
             # Connect to broker
             if self.mqtt_client.connect(blocking=True, timeout=5.0):
                 print(f"[MQTT] 연결 성공: {MQTT_BROKER}:{MQTT_PORT}")
                 print(f"[MQTT] Device: {DEVICE_ID} ({DEVICE_NAME}) @ {get_ip_address()}")
                 print(f"[MQTT] 구독 토픽 (로봇→Jetson):")
                 print(f"  - {MQTT_TOPIC_STIRFRY_FOOD_TYPE}")
+                print(f"  - calibration/vibration/control")
                 print(f"[MQTT] 발행 토픽 (Jetson→로봇):")
                 print(f"  - {MQTT_TOPIC_SYSTEM_AI_MODE}")
                 print(f"  - {MQTT_TOPIC_STIRFRY_STATUS}")
@@ -1267,6 +1277,10 @@ class IntegratedMonitorApp:
     def update_auto_preview(self, frame):
         """Update auto system preview with auto-zoom and auto-hide"""
         try:
+            # Add camera number indicator (small, top-left)
+            cv2.putText(frame, "Cam 3", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
+
             # Option 3: Check if preview should be shown
             should_show = self.should_show_preview("auto")
 
@@ -1308,6 +1322,10 @@ class IntegratedMonitorApp:
     def update_stirfry_left_preview(self, frame):
         """Update stir-fry LEFT camera preview with auto-zoom and auto-hide"""
         try:
+            # Add camera number indicator (small, top-left)
+            cv2.putText(frame, "Cam 0", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
+
             # Option 3: Check if preview should be shown (only when recording)
             should_show = self.should_show_preview("stirfry_left")
 
@@ -1373,6 +1391,10 @@ class IntegratedMonitorApp:
     def update_stirfry_right_preview(self, frame):
         """Update stir-fry RIGHT camera preview with auto-zoom and auto-hide"""
         try:
+            # Add camera number indicator (small, top-left)
+            cv2.putText(frame, "Cam 1", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
+
             # Option 3: Check if preview should be shown (only when recording)
             should_show = self.should_show_preview("stirfry_right")
 
@@ -1498,6 +1520,38 @@ class IntegratedMonitorApp:
 
             except Exception as e:
                 print(f"[MQTT] 전송 오류: {e}")
+
+    def publish_mqtt_periodic(self):
+        """Periodically publish current state to MQTT"""
+        if not self.running:
+            return
+
+        if self.mqtt_client is not None and self.mqtt_client.is_connected():
+            try:
+                # Determine current state
+                current_state = "ON" if self.person_detected else "OFF"
+
+                # Enhanced payload with system metrics
+                payload = {
+                    "command": current_state,
+                    "source": "auto_start_system_periodic",
+                    "person_detected": self.person_detected,
+                    "motion_detected": self.motion_detected,
+                    "system_metrics": self.system_info.get_dynamic_info()
+                }
+
+                # Publish to robot/control topic
+                self.mqtt_client.publish(
+                    topic_suffix="robot/control",
+                    payload=payload,
+                    qos=MQTT_QOS
+                )
+            except Exception as e:
+                print(f"[MQTT 주기발행] 오류: {e}")
+
+        # Schedule next publish
+        interval_ms = int(MQTT_PUBLISH_INTERVAL * 1000)
+        self.root.after(interval_ms, self.publish_mqtt_periodic)
 
     def send_mqtt_message(self, topic, message, include_device_info=True):
         """Send MQTT message with optional device info"""
@@ -1825,10 +1879,64 @@ class IntegratedMonitorApp:
 
         print("[PC상태] PC 상태 창 열림")
 
-    def open_vibration_check(self):
-        """Open vibration sensor monitoring program"""
+    def on_vibration_control(self, client, userdata, message):
+        """MQTT callback for vibration control - robust parsing"""
+        try:
+            # 받은 메시지 전체를 로그로 출력 (디버깅용)
+            raw_message = message.payload.decode('utf-8')
+            print("=" * 60)
+            print(f"[진동 MQTT] 수신 메시지 (topic: {message.topic}):")
+            print(f"  Raw: {raw_message}")
+
+            # 파싱 시도 1: JSON 형태
+            command = None
+            try:
+                data = json.loads(raw_message)
+                print(f"  Parsed JSON: {data}")
+
+                # 다양한 키 시도
+                for key in ["command", "cmd", "action", "control", "status"]:
+                    if key in data:
+                        command = str(data[key]).upper()
+                        print(f"  Command key '{key}': {command}")
+                        break
+            except json.JSONDecodeError:
+                # JSON이 아니면 단순 문자열로 처리
+                command = raw_message.upper().strip()
+                print(f"  Plain text command: {command}")
+
+            # 명령어 인식 (유연하게)
+            if command:
+                # START 키워드들
+                if any(word in command for word in ["START", "BEGIN", "ON", "OPEN", "RUN"]):
+                    print("[진동 MQTT] ✓ 시작 명령 인식")
+                    self.start_vibration_check()
+
+                # STOP 키워드들
+                elif any(word in command for word in ["STOP", "END", "OFF", "CLOSE", "QUIT"]):
+                    print("[진동 MQTT] ✓ 종료 명령 인식")
+                    self.stop_vibration_check()
+
+                else:
+                    print(f"[진동 MQTT] ⚠ 알 수 없는 명령: {command}")
+            else:
+                print("[진동 MQTT] ⚠ 명령을 찾을 수 없음")
+
+            print("=" * 60)
+
+        except Exception as e:
+            print(f"[진동 MQTT] 파싱 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def start_vibration_check(self):
+        """Start vibration sensor monitoring program"""
         import subprocess
         import os
+
+        if self.vibration_process is not None:
+            print("[진동] 이미 실행 중입니다")
+            return
 
         # 상대 경로로 수정 (jetson-food-ai 기준)
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1840,11 +1948,49 @@ class IntegratedMonitorApp:
 
         try:
             # 진동 센서 프로그램을 별도 프로세스로 실행
-            proc = subprocess.Popen(["python3", vibration_script], cwd=base_dir)
-            self.child_processes.append(proc)
-            print("[진동] 진동 센서 프로그램 실행")
+            self.vibration_process = subprocess.Popen(
+                ["python3", vibration_script],
+                cwd=base_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            self.child_processes.append(self.vibration_process)
+            print(f"[진동] 프로세스 시작 (PID: {self.vibration_process.pid})")
         except Exception as e:
             print(f"[진동] 실행 오류: {e}")
+            self.vibration_process = None
+
+    def stop_vibration_check(self):
+        """Stop vibration sensor monitoring program"""
+        if self.vibration_process is None:
+            print("[진동] 실행 중인 프로세스 없음")
+            return
+
+        try:
+            print(f"[진동] 프로세스 종료 중 (PID: {self.vibration_process.pid})")
+            self.vibration_process.terminate()  # SIGTERM 전송
+
+            try:
+                self.vibration_process.wait(timeout=3)  # 3초 대기
+                print("[진동] 프로세스 정상 종료")
+            except subprocess.TimeoutExpired:
+                print("[진동] 타임아웃 - 강제 종료")
+                self.vibration_process.kill()  # SIGKILL 전송
+                self.vibration_process.wait()
+
+            # child_processes 리스트에서도 제거
+            if self.vibration_process in self.child_processes:
+                self.child_processes.remove(self.vibration_process)
+
+        except Exception as e:
+            print(f"[진동] 종료 오류: {e}")
+        finally:
+            self.vibration_process = None
+
+    def open_vibration_check(self):
+        """Open vibration sensor monitoring program (GUI button)"""
+        print("[진동] GUI 버튼으로 수동 실행")
+        self.start_vibration_check()
 
     def handle_settings_tap(self):
         """Handle settings button tap - 5 taps reveals shutdown"""

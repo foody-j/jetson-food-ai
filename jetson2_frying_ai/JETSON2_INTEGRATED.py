@@ -148,6 +148,7 @@ MQTT_TOPIC_FOOD_TYPE = config.get('mqtt_topic_food_type', 'frying/food_type')
 MQTT_TOPIC_FRYING_CONTROL = config.get('mqtt_topic_frying_control', 'frying/control')
 MQTT_QOS = config.get('mqtt_qos', 1)
 MQTT_CLIENT_ID = config.get('mqtt_client_id', 'jetson2_ai')
+MQTT_PUBLISH_INTERVAL = config.get('mqtt_publish_interval', 5)  # seconds
 # AI Mode Setting
 AI_MODE_ENABLED = config.get('ai_mode_enabled', False)
 
@@ -295,6 +296,7 @@ class JetsonIntegratedApp:
 
         # Subprocess tracking (진동센서 등)
         self.child_processes = []
+        self.vibration_process = None  # 진동센서 프로세스 추적
 
         # Frame skip counters (CPU 절약)
         self.frying_frame_skip = 0
@@ -359,6 +361,10 @@ class JetsonIntegratedApp:
         self.update_observe_right()
         self.update_clock()
 
+        # Start periodic MQTT publishing
+        if MQTT_ENABLED:
+            self.publish_mqtt_periodic()
+
         # Fullscreen toggle
         self.is_fullscreen = False
         self.root.bind('<F11>', lambda e: self.toggle_fullscreen())
@@ -386,6 +392,9 @@ class JetsonIntegratedApp:
             self.mqtt_client.subscribe(MQTT_TOPIC_FOOD_TYPE, self.on_food_type)
             self.mqtt_client.subscribe(MQTT_TOPIC_FRYING_CONTROL, self.on_frying_control)
 
+            # Subscribe to vibration control topic
+            self.mqtt_client.subscribe("calibration/vibration/control", self.on_vibration_control)
+
             self.mqtt_client.connect()
             print(f"[MQTT] 연결 성공: {MQTT_BROKER}:{MQTT_PORT}")
             print(f"[MQTT] Device: {DEVICE_ID} ({DEVICE_NAME}) @ {get_ip_address()}")
@@ -395,6 +404,7 @@ class JetsonIntegratedApp:
             print(f"  - {MQTT_TOPIC_PROBE_TEMP_LEFT}")
             print(f"  - {MQTT_TOPIC_PROBE_TEMP_RIGHT}")
             print(f"  - {MQTT_TOPIC_FOOD_TYPE}")
+            print(f"  - calibration/vibration/control")
             print(f"[MQTT] 발행 토픽 (Jetson→로봇):")
             print(f"  - {MQTT_TOPIC_OBSERVE}")
             print(f"  - {MQTT_TOPIC_FRYING}")
@@ -525,6 +535,30 @@ class JetsonIntegratedApp:
                     print(f"[MQTT] 수집 중이 아님 - 무시")
         except Exception as e:
             print(f"[MQTT] 제어 명령 수신 오류: {e}")
+
+    def publish_mqtt_periodic(self):
+        """Periodically publish current observe state to MQTT"""
+        if not self.running:
+            return
+
+        if self.mqtt_client and MQTT_ENABLED:
+            try:
+                # Publish left bucket status
+                if self.observe_left_state is not None:
+                    left_msg = f"LEFT:{self.observe_left_state}"
+                    self.send_mqtt_message(MQTT_TOPIC_OBSERVE, left_msg, include_device_info=True)
+
+                # Publish right bucket status
+                if self.observe_right_state is not None:
+                    right_msg = f"RIGHT:{self.observe_right_state}"
+                    self.send_mqtt_message(MQTT_TOPIC_OBSERVE, right_msg, include_device_info=True)
+
+            except Exception as e:
+                print(f"[MQTT 주기발행] 오류: {e}")
+
+        # Schedule next publish
+        interval_ms = int(MQTT_PUBLISH_INTERVAL * 1000)
+        self.root.after(interval_ms, self.publish_mqtt_periodic)
 
     def send_mqtt_message(self, topic, message, include_device_info=True):
         """Send MQTT message with optional device info"""
@@ -1026,6 +1060,10 @@ class JetsonIntegratedApp:
         if ret:
             vis = frame.copy()
 
+            # Add camera number indicator (small, top-left)
+            cv2.putText(vis, "Cam 0", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
+
             if self.frying_running:
                 # Frame skip: AI 처리는 N프레임마다 (CPU 절약)
                 self.frying_frame_skip += 1
@@ -1127,6 +1165,10 @@ class JetsonIntegratedApp:
         if ret:
             vis = frame.copy()
 
+            # Add camera number indicator (small, top-left)
+            cv2.putText(vis, "Cam 1", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
+
             if self.frying_running:
                 # Frame skip은 왼쪽과 공유 (같은 카운터)
                 if self.frying_frame_skip == 0:  # 왼쪽에서 리셋된 경우
@@ -1225,6 +1267,10 @@ class JetsonIntegratedApp:
         if ret:
             vis = frame.copy()
             H, W = frame.shape[:2]
+
+            # Add camera number indicator (small, top-left)
+            cv2.putText(vis, "Cam 2", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
 
             if self.observe_running:
                 # Frame skip: YOLO는 매우 무거움 (config로 조정)
@@ -1366,6 +1412,10 @@ class JetsonIntegratedApp:
         if ret:
             vis = frame.copy()
             H, W = frame.shape[:2]
+
+            # Add camera number indicator (small, top-left)
+            cv2.putText(vis, "Cam 3", (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 255, 255), 1, cv2.LINE_AA)
 
             if self.observe_running:
                 # Frame skip은 왼쪽과 공유 (같은 카운터)
@@ -1625,10 +1675,64 @@ class JetsonIntegratedApp:
 
         print("[PC상태] PC 상태 창 열림")
 
-    def open_vibration_check(self):
-        """Open vibration sensor monitoring program"""
+    def on_vibration_control(self, client, userdata, message):
+        """MQTT callback for vibration control - robust parsing"""
+        try:
+            # 받은 메시지 전체를 로그로 출력 (디버깅용)
+            raw_message = message.payload.decode('utf-8')
+            print("=" * 60)
+            print(f"[진동 MQTT] 수신 메시지 (topic: {message.topic}):")
+            print(f"  Raw: {raw_message}")
+
+            # 파싱 시도 1: JSON 형태
+            command = None
+            try:
+                data = json.loads(raw_message)
+                print(f"  Parsed JSON: {data}")
+
+                # 다양한 키 시도
+                for key in ["command", "cmd", "action", "control", "status"]:
+                    if key in data:
+                        command = str(data[key]).upper()
+                        print(f"  Command key '{key}': {command}")
+                        break
+            except json.JSONDecodeError:
+                # JSON이 아니면 단순 문자열로 처리
+                command = raw_message.upper().strip()
+                print(f"  Plain text command: {command}")
+
+            # 명령어 인식 (유연하게)
+            if command:
+                # START 키워드들
+                if any(word in command for word in ["START", "BEGIN", "ON", "OPEN", "RUN"]):
+                    print("[진동 MQTT] ✓ 시작 명령 인식")
+                    self.start_vibration_check()
+
+                # STOP 키워드들
+                elif any(word in command for word in ["STOP", "END", "OFF", "CLOSE", "QUIT"]):
+                    print("[진동 MQTT] ✓ 종료 명령 인식")
+                    self.stop_vibration_check()
+
+                else:
+                    print(f"[진동 MQTT] ⚠ 알 수 없는 명령: {command}")
+            else:
+                print("[진동 MQTT] ⚠ 명령을 찾을 수 없음")
+
+            print("=" * 60)
+
+        except Exception as e:
+            print(f"[진동 MQTT] 파싱 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def start_vibration_check(self):
+        """Start vibration sensor monitoring program"""
         import subprocess
         import os
+
+        if self.vibration_process is not None:
+            print("[진동] 이미 실행 중입니다")
+            return
 
         # 상대 경로로 수정 (jetson-food-ai 기준)
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1640,11 +1744,49 @@ class JetsonIntegratedApp:
 
         try:
             # 진동 센서 프로그램을 별도 프로세스로 실행
-            proc = subprocess.Popen(["python3", vibration_script], cwd=base_dir)
-            self.child_processes.append(proc)
-            print("[진동] 진동 센서 프로그램 실행")
+            self.vibration_process = subprocess.Popen(
+                ["python3", vibration_script],
+                cwd=base_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            self.child_processes.append(self.vibration_process)
+            print(f"[진동] 프로세스 시작 (PID: {self.vibration_process.pid})")
         except Exception as e:
             print(f"[진동] 실행 오류: {e}")
+            self.vibration_process = None
+
+    def stop_vibration_check(self):
+        """Stop vibration sensor monitoring program"""
+        if self.vibration_process is None:
+            print("[진동] 실행 중인 프로세스 없음")
+            return
+
+        try:
+            print(f"[진동] 프로세스 종료 중 (PID: {self.vibration_process.pid})")
+            self.vibration_process.terminate()  # SIGTERM 전송
+
+            try:
+                self.vibration_process.wait(timeout=3)  # 3초 대기
+                print("[진동] 프로세스 정상 종료")
+            except subprocess.TimeoutExpired:
+                print("[진동] 타임아웃 - 강제 종료")
+                self.vibration_process.kill()  # SIGKILL 전송
+                self.vibration_process.wait()
+
+            # child_processes 리스트에서도 제거
+            if self.vibration_process in self.child_processes:
+                self.child_processes.remove(self.vibration_process)
+
+        except Exception as e:
+            print(f"[진동] 종료 오류: {e}")
+        finally:
+            self.vibration_process = None
+
+    def open_vibration_check(self):
+        """Open vibration sensor monitoring program (GUI button)"""
+        print("[진동] GUI 버튼으로 수동 실행")
+        self.start_vibration_check()
 
     def open_settings(self):
         """Open settings dialog (placeholder)"""
