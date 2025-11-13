@@ -522,9 +522,11 @@ class IntegratedMonitorApp:
                                        bg=COLOR_PANEL, fg=COLOR_WARNING, anchor="w")
         self.auto_mqtt_label.grid(row=1, column=1, sticky="w", padx=5, pady=2)
 
-        # Camera preview area with camera number overlay
-        preview_container = tk.Frame(panel, bg="black")
-        preview_container.pack(pady=5, padx=5, fill=tk.BOTH, expand=True)
+        # Camera preview area with camera number overlay - FIXED HEIGHT for 768x1024
+        preview_height = int(350 * self.scale_factor)  # Fixed height to prevent overflow
+        preview_container = tk.Frame(panel, bg="black", height=preview_height)
+        preview_container.pack(pady=5, padx=5, fill=tk.X)
+        preview_container.pack_propagate(False)  # Prevent container from expanding
 
         self.auto_preview_label = tk.Label(preview_container, text="[카메라 로딩 중...]",
                                           bg="black", fg="white", font=NORMAL_FONT)
@@ -1204,8 +1206,9 @@ class IntegratedMonitorApp:
             else:
                 if self.night_no_person_deadline is not None:
                     remain = int((self.night_no_person_deadline - now).total_seconds())
-                    if remain >= 0:
-                        self.auto_detection_label.config(text=f"감지: {remain}초 남음", fg=COLOR_INFO)
+                    # Clamp to minimum 0 to prevent negative display
+                    remain = max(0, remain)
+                    self.auto_detection_label.config(text=f"감지: {remain}초 남음", fg=COLOR_INFO)
         else:
             # Stage 2: Motion detection
             if self.frame_idx > WARMUP_FRAMES:
@@ -1516,13 +1519,17 @@ class IntegratedMonitorApp:
         Returns True if preview should be visible, False to hide
         """
         if camera_type == "auto":
-            # Auto camera: hide after 30s of no person detection
+            # Auto camera: hide after preview_hide_delay of no person detection
+            # If preview_hide_delay is 999999 (from config), effectively never hide
             if self.last_person_detected_time is None:
                 # First time, initialize to now to prevent immediate hiding
                 self.last_person_detected_time = datetime.now()
                 return True  # First time, always show
 
             elapsed = (datetime.now() - self.last_person_detected_time).total_seconds()
+            # If delay is very large (999999), always show
+            if self.preview_hide_delay >= 999999:
+                return True
             return elapsed < self.preview_hide_delay
 
         elif camera_type in ["stirfry_left", "stirfry_right"]:
