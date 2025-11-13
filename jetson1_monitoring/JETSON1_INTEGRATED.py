@@ -31,6 +31,9 @@ from src.core.system_info import SystemInfo
 # Import GStreamer camera wrapper (optimized for UYVY format)
 from gst_camera import GstCamera
 
+# Import GPIO for SSR control
+import Jetson.GPIO as GPIO
+
 # =========================
 # Load Configuration
 # =========================
@@ -288,6 +291,9 @@ class IntegratedMonitorApp:
         self.person_detected = False
         self.motion_detected = False
 
+        # SSR control via GPIO
+        self.ssr_enabled = False  # SSR current state
+
         # OpenCV background subtractor
         self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         self.bg = cv2.createBackgroundSubtractorMOG2(
@@ -299,6 +305,10 @@ class IntegratedMonitorApp:
         # Detect screen size and build GUI
         self.detect_screen_size()
         self.create_gui()
+
+        # Initialize GPIO for SSR control
+        print("[초기화] GPIO SSR 제어 초기화 중...")
+        self.init_gpio()
 
         # Initialize cameras and YOLO
         print("[초기화] 카메라 및 YOLO 초기화 중...")
@@ -701,6 +711,39 @@ class IntegratedMonitorApp:
     # =========================
     # Initialization
     # =========================
+    def init_gpio(self):
+        """Initialize GPIO for SSR control"""
+        try:
+            GPIO.setmode(GPIO.BOARD)
+            GPIO.setup(7, GPIO.OUT, initial=GPIO.LOW)  # Pin 7 for SSR control, initially OFF
+            print("[GPIO] Pin 7 initialized for SSR control (초기 상태: OFF)")
+        except Exception as e:
+            print(f"[GPIO] 초기화 실패: {e}")
+
+    def ssr_turn_on(self):
+        """Turn on SSR (heater/equipment)"""
+        if not self.ssr_enabled:
+            try:
+                GPIO.output(7, GPIO.HIGH)
+                self.ssr_enabled = True
+                print("=" * 50)
+                print("제어 PC ON")
+                print("=" * 50)
+            except Exception as e:
+                print(f"[GPIO] SSR ON 실패: {e}")
+
+    def ssr_turn_off(self):
+        """Turn off SSR (heater/equipment)"""
+        if self.ssr_enabled:
+            try:
+                GPIO.output(7, GPIO.LOW)
+                self.ssr_enabled = False
+                print("=" * 50)
+                print("제어 PC OFF")
+                print("=" * 50)
+            except Exception as e:
+                print(f"[GPIO] SSR OFF 실패: {e}")
+
     def init_mqtt(self):
         """Initialize MQTT connection with new centralized client"""
         if not MQTT_ENABLED:
@@ -1035,6 +1078,7 @@ class IntegratedMonitorApp:
                     print("=" * 50)
                     self.publish_mqtt("ON")
                     self.on_triggered = True
+                    self.ssr_turn_on()  # Turn on SSR when person detected during work hours
                     self.auto_detection_label.config(text="감지: ON 전송 완료", fg=COLOR_OK)
         else:
             # No person detected
@@ -1083,6 +1127,7 @@ class IntegratedMonitorApp:
                     print("=" * 50)
                     self.publish_mqtt("OFF")
                     self.off_triggered_once = True
+                    self.ssr_turn_off()  # Turn off SSR after 10min no person detection
                     self.auto_detection_label.config(text="감지: OFF 전송 ✓", fg=COLOR_OK)
                 self.night_check_active = False
                 self.night_no_person_deadline = None
@@ -1918,6 +1963,14 @@ class IntegratedMonitorApp:
                             self.mqtt_client.disconnect()
                         except:
                             pass
+
+                    # Cleanup GPIO
+                    try:
+                        print("[종료] GPIO 정리 중...")
+                        GPIO.cleanup()
+                        print("[종료] GPIO 정리 완료")
+                    except Exception as e:
+                        print(f"[종료] GPIO 정리 오류: {e}")
 
                 except Exception as e:
                     print(f"[종료] 정리 중 오류: {e}")

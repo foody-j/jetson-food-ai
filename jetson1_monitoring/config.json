@@ -29,10 +29,10 @@
   "yolo_confidence": 0.7,
   "_comment_yolo_imgsz": "YOLO 입력 이미지 크기 (높을수록 정확하지만 느림, 권장: 416~640)",
   "yolo_imgsz": 416,
-  "detection_hold_sec": 30,
+  "detection_hold_sec": 2,
 
   "_comment_night": "야간 모드 설정 - 스냅샷 민감도 조정",
-  "night_check_minutes": 0,
+  "night_check_minutes": 10,
   "_comment_motion_area": "모션 감지 최소 면적 (픽셀) - 높을수록 덜 민감 (권장: 1000~3000)",
   "motion_min_area": 1500,
   "_comment_mog2_varthresh": "MOG2 배경 차분 임계값 (낮을수록 더 민감, 권장: 8~32)",
