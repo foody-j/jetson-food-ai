@@ -61,8 +61,10 @@
   "mqtt_port": 1883,
   "mqtt_topic": "robot/control",
   "mqtt_topic_ai_mode": "jetson1/system/ai_mode",
-  "mqtt_topic_stirfry_food_type": "stirfry/food_type",
-  "mqtt_topic_stirfry_control": "stirfry/control",
+  "mqtt_topic_stirfry_pot1_food_type": "stirfry/pot1/food_type",
+  "mqtt_topic_stirfry_pot1_control": "stirfry/pot1/control",
+  "mqtt_topic_stirfry_pot2_food_type": "stirfry/pot2/food_type",
+  "mqtt_topic_stirfry_pot2_control": "stirfry/pot2/control",
   "mqtt_qos": 1,
   "mqtt_client_id": "jetson1_ai",
   "_comment_mqtt_publish_interval": "MQTT 상태 발행 주기 (초)",
@@ -84,7 +86,7 @@
   "stirfry_right_camera_index": 1,
 
   "_comment_stirfry_save": "볶음 데이터 저장 설정",
-  "stirfry_save_dir": "~/StirFry_Data",
+  "stirfry_save_dir": "AI_Data/StirFryData",
   "stirfry_save_resolution": {
     "width": 1280,
     "height": 720

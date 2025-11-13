@@ -146,6 +146,11 @@ MQTT_TOPIC_PROBE_TEMP_LEFT = config.get('mqtt_topic_probe_temp_left', 'frying/pr
 MQTT_TOPIC_PROBE_TEMP_RIGHT = config.get('mqtt_topic_probe_temp_right', 'frying/probe_temp/right')
 MQTT_TOPIC_FOOD_TYPE = config.get('mqtt_topic_food_type', 'frying/food_type')
 MQTT_TOPIC_FRYING_CONTROL = config.get('mqtt_topic_frying_control', 'frying/control')
+# POT1/POT2 Separate Control Topics (subscribed by Jetson)
+MQTT_TOPIC_FRYING_POT1_FOOD_TYPE = config.get('mqtt_topic_frying_pot1_food_type', 'frying/pot1/food_type')
+MQTT_TOPIC_FRYING_POT1_CONTROL = config.get('mqtt_topic_frying_pot1_control', 'frying/pot1/control')
+MQTT_TOPIC_FRYING_POT2_FOOD_TYPE = config.get('mqtt_topic_frying_pot2_food_type', 'frying/pot2/food_type')
+MQTT_TOPIC_FRYING_POT2_CONTROL = config.get('mqtt_topic_frying_pot2_control', 'frying/pot2/control')
 MQTT_QOS = config.get('mqtt_qos', 1)
 MQTT_CLIENT_ID = config.get('mqtt_client_id', 'jetson2_ai')
 MQTT_PUBLISH_INTERVAL = config.get('mqtt_publish_interval', 5)  # seconds
@@ -325,7 +330,7 @@ class JetsonIntegratedApp:
         self.frying_running = False
         self.observe_running = False
 
-        # Data collection flags
+        # Data collection flags (LEGACY - for backward compatibility)
         self.data_collection_active = False
         self.collection_session_id = None
         self.collection_start_time = None
@@ -336,6 +341,30 @@ class JetsonIntegratedApp:
         self.collection_completion_marked = False  # 완료 시점 마킹 여부
         self.collection_completion_time = None  # 완료 시점 타임스탬프
         self.collection_completion_info = {}  # 완료 시점의 온도/시간 정보
+
+        # POT1 data collection (cameras 0, 1)
+        self.pot1_collecting = False
+        self.pot1_session_id = None
+        self.pot1_start_time = None
+        self.pot1_frame_counter = 0
+        self.pot1_timer = 0
+        self.pot1_food_type = "unknown"
+        self.pot1_metadata = []
+        self.pot1_completion_marked = False
+        self.pot1_completion_time = None
+        self.pot1_completion_info = {}
+
+        # POT2 data collection (cameras 2, 3)
+        self.pot2_collecting = False
+        self.pot2_session_id = None
+        self.pot2_start_time = None
+        self.pot2_frame_counter = 0
+        self.pot2_timer = 0
+        self.pot2_food_type = "unknown"
+        self.pot2_metadata = []
+        self.pot2_completion_marked = False
+        self.pot2_completion_time = None
+        self.pot2_completion_info = {}
 
         # Latest frames for data collection
         self.latest_frying_left_frame = None
@@ -383,9 +412,15 @@ class JetsonIntegratedApp:
             self.mqtt_client.subscribe(MQTT_TOPIC_PROBE_TEMP_LEFT, self.on_probe_temp_left)
             self.mqtt_client.subscribe(MQTT_TOPIC_PROBE_TEMP_RIGHT, self.on_probe_temp_right)
 
-            # Subscribe to food type topic
+            # Subscribe to food type topic (LEGACY)
             self.mqtt_client.subscribe(MQTT_TOPIC_FOOD_TYPE, self.on_food_type)
             self.mqtt_client.subscribe(MQTT_TOPIC_FRYING_CONTROL, self.on_frying_control)
+
+            # Subscribe to POT1/POT2 control topics
+            self.mqtt_client.subscribe(MQTT_TOPIC_FRYING_POT1_FOOD_TYPE, self.on_frying_pot1_food_type)
+            self.mqtt_client.subscribe(MQTT_TOPIC_FRYING_POT1_CONTROL, self.on_frying_pot1_control)
+            self.mqtt_client.subscribe(MQTT_TOPIC_FRYING_POT2_FOOD_TYPE, self.on_frying_pot2_food_type)
+            self.mqtt_client.subscribe(MQTT_TOPIC_FRYING_POT2_CONTROL, self.on_frying_pot2_control)
 
             # Subscribe to vibration control topic
             self.mqtt_client.subscribe("calibration/vibration/control", self.on_vibration_control)
@@ -530,6 +565,77 @@ class JetsonIntegratedApp:
                     print(f"[MQTT] 수집 중이 아님 - 무시")
         except Exception as e:
             print(f"[MQTT] 제어 명령 수신 오류: {e}")
+
+    # POT1/POT2 Separate Control MQTT Callbacks
+    def on_frying_pot1_food_type(self, client, userdata, message):
+        """MQTT callback for pot1 food type - AUTO START collection"""
+        try:
+            self.pot1_food_type = message.payload.decode()
+            print(f"[MQTT POT1] 음식 종류 수신: {self.pot1_food_type}")
+
+            if not self.pot1_collecting:
+                print(f"[MQTT POT1] 자동 수집 시작 - 음식: {self.pot1_food_type}")
+                self.root.after(0, self.start_pot1_collection)
+            else:
+                # Store metadata event
+                from datetime import datetime
+                self.pot1_metadata.append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                    "type": "food_type_change",
+                    "value": self.pot1_food_type
+                })
+        except Exception as e:
+            print(f"[MQTT POT1] 음식 종류 수신 오류: {e}")
+
+    def on_frying_pot1_control(self, client, userdata, message):
+        """MQTT callback for pot1 control commands"""
+        try:
+            command = message.payload.decode().strip().lower()
+            print(f"[MQTT POT1] 제어 명령 수신: {command}")
+
+            if command == "stop":
+                if self.pot1_collecting:
+                    print(f"[MQTT POT1] 자동 수집 중지")
+                    self.root.after(0, self.stop_pot1_collection)
+                else:
+                    print(f"[MQTT POT1] 수집 중이 아님 - 무시")
+        except Exception as e:
+            print(f"[MQTT POT1] 제어 명령 수신 오류: {e}")
+
+    def on_frying_pot2_food_type(self, client, userdata, message):
+        """MQTT callback for pot2 food type - AUTO START collection"""
+        try:
+            self.pot2_food_type = message.payload.decode()
+            print(f"[MQTT POT2] 음식 종류 수신: {self.pot2_food_type}")
+
+            if not self.pot2_collecting:
+                print(f"[MQTT POT2] 자동 수집 시작 - 음식: {self.pot2_food_type}")
+                self.root.after(0, self.start_pot2_collection)
+            else:
+                # Store metadata event
+                from datetime import datetime
+                self.pot2_metadata.append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                    "type": "food_type_change",
+                    "value": self.pot2_food_type
+                })
+        except Exception as e:
+            print(f"[MQTT POT2] 음식 종류 수신 오류: {e}")
+
+    def on_frying_pot2_control(self, client, userdata, message):
+        """MQTT callback for pot2 control commands"""
+        try:
+            command = message.payload.decode().strip().lower()
+            print(f"[MQTT POT2] 제어 명령 수신: {command}")
+
+            if command == "stop":
+                if self.pot2_collecting:
+                    print(f"[MQTT POT2] 자동 수집 중지")
+                    self.root.after(0, self.stop_pot2_collection)
+                else:
+                    print(f"[MQTT POT2] 수집 중이 아님 - 무시")
+        except Exception as e:
+            print(f"[MQTT POT2] 제어 명령 수신 오류: {e}")
 
     def publish_mqtt_periodic(self):
         """Periodically publish current observe state to MQTT"""
@@ -1149,7 +1255,18 @@ class JetsonIntegratedApp:
             # Store latest frame for data collection
             self.latest_frying_left_frame = frame.copy()
 
-            # Data collection timer (shared across all active cameras)
+            # POT1 data collection timer
+            if self.pot1_collecting:
+                self.pot1_timer += GUI_UPDATE_INTERVAL / 1000.0
+                if self.pot1_timer >= self.collection_interval:
+                    self.pot1_timer = 0
+                    # Trigger POT1 data collection (cameras 0, 1)
+                    self.save_pot1_data(
+                        self.latest_frying_left_frame,
+                        self.latest_frying_right_frame
+                    )
+
+            # LEGACY: Data collection timer (shared across all active cameras)
             if self.data_collection_active:
                 self.collection_timer += GUI_UPDATE_INTERVAL / 1000.0
                 if self.collection_timer >= self.collection_interval:
@@ -1388,7 +1505,18 @@ class JetsonIntegratedApp:
             # Store latest frame for data collection
             self.latest_observe_left_frame = frame.copy()
 
-            # Data collection timer (only if frying cameras are not active)
+            # POT2 data collection timer
+            if self.pot2_collecting:
+                self.pot2_timer += GUI_UPDATE_INTERVAL / 1000.0
+                if self.pot2_timer >= self.collection_interval:
+                    self.pot2_timer = 0
+                    # Trigger POT2 data collection (cameras 2, 3)
+                    self.save_pot2_data(
+                        self.latest_observe_left_frame,
+                        self.latest_observe_right_frame
+                    )
+
+            # LEGACY: Data collection timer (only if frying cameras are not active)
             if self.data_collection_active and self.frying_left_cap is None and self.frying_right_cap is None:
                 self.collection_timer += GUI_UPDATE_INTERVAL / 1000.0
                 if self.collection_timer >= self.collection_interval:
@@ -2011,8 +2139,197 @@ class JetsonIntegratedApp:
         self.collection_start_time = None
         self.current_food_type = "unknown"
 
+    # POT1/POT2 Separate Collection Functions
+    def start_pot1_collection(self):
+        """Start POT1 data collection (cameras 0, 1)"""
+        from datetime import datetime
+        import os
+
+        # Create session ID
+        self.pot1_session_id = datetime.now().strftime("session_%Y%m%d_%H%M%S")
+        self.pot1_start_time = datetime.now()
+        self.pot1_frame_counter = 0
+        self.pot1_timer = 0
+
+        # Create session directories - pot1/session_id/food_type/camera_X
+        base_dir = os.path.expanduser("~/AI_Data/FryingData")
+        self.pot1_session_dir = os.path.join(base_dir, "pot1", self.pot1_session_id, self.pot1_food_type)
+
+        for cam_idx in [0, 1]:
+            os.makedirs(os.path.join(self.pot1_session_dir, f"camera_{cam_idx}"), mode=0o755, exist_ok=True)
+
+        # Reset completion flags
+        self.pot1_completion_marked = False
+        self.pot1_completion_time = None
+        self.pot1_completion_info = {}
+
+        # Update flags
+        self.pot1_collecting = True
+        self.pot1_metadata = []  # Reset metadata
+
+        print(f"[POT1 수집] 시작: {self.pot1_session_id}")
+        print(f"[POT1 수집] 음식 종류: {self.pot1_food_type}")
+        print(f"[POT1 수집] 저장 경로: {self.pot1_session_dir}")
+
+    def stop_pot1_collection(self):
+        """Stop POT1 data collection"""
+        from datetime import datetime
+        import json
+        import os
+
+        if not self.pot1_collecting:
+            return
+
+        self.pot1_collecting = False
+        duration = (datetime.now() - self.pot1_start_time).total_seconds()
+
+        # Save session info
+        session_info = {
+            "pot": "pot1",
+            "session_id": self.pot1_session_id,
+            "food_type": self.pot1_food_type,
+            "start_time": self.pot1_start_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "end_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "duration_sec": duration,
+            "collection_interval": self.collection_interval,
+            "completion_info": self.pot1_completion_info if self.pot1_completion_marked else None,
+            "completion_marked": self.pot1_completion_marked,
+            "cameras_used": [0, 1],
+            "total_frames_saved": self.pot1_frame_counter,
+            "raw_metadata": self.pot1_metadata,
+            "metadata_count": len(self.pot1_metadata)
+        }
+
+        # Save metadata
+        info_path = os.path.join(self.pot1_session_dir, "session_info.json")
+        with open(info_path, 'w', encoding='utf-8') as f:
+            json.dump(session_info, f, indent=2, ensure_ascii=False)
+
+        print(f"[POT1 수집] 종료: {self.pot1_frame_counter}장 저장, {duration:.1f}초")
+        print(f"[POT1 수집] 음식 종류: {self.pot1_food_type}")
+
+        # Reset session
+        self.pot1_session_id = None
+        self.pot1_start_time = None
+
+    def start_pot2_collection(self):
+        """Start POT2 data collection (cameras 2, 3)"""
+        from datetime import datetime
+        import os
+
+        # Create session ID
+        self.pot2_session_id = datetime.now().strftime("session_%Y%m%d_%H%M%S")
+        self.pot2_start_time = datetime.now()
+        self.pot2_frame_counter = 0
+        self.pot2_timer = 0
+
+        # Create session directories - pot2/session_id/food_type/camera_X
+        base_dir = os.path.expanduser("~/AI_Data/FryingData")
+        self.pot2_session_dir = os.path.join(base_dir, "pot2", self.pot2_session_id, self.pot2_food_type)
+
+        for cam_idx in [2, 3]:
+            os.makedirs(os.path.join(self.pot2_session_dir, f"camera_{cam_idx}"), mode=0o755, exist_ok=True)
+
+        # Reset completion flags
+        self.pot2_completion_marked = False
+        self.pot2_completion_time = None
+        self.pot2_completion_info = {}
+
+        # Update flags
+        self.pot2_collecting = True
+        self.pot2_metadata = []  # Reset metadata
+
+        print(f"[POT2 수집] 시작: {self.pot2_session_id}")
+        print(f"[POT2 수집] 음식 종류: {self.pot2_food_type}")
+        print(f"[POT2 수집] 저장 경로: {self.pot2_session_dir}")
+
+    def stop_pot2_collection(self):
+        """Stop POT2 data collection"""
+        from datetime import datetime
+        import json
+        import os
+
+        if not self.pot2_collecting:
+            return
+
+        self.pot2_collecting = False
+        duration = (datetime.now() - self.pot2_start_time).total_seconds()
+
+        # Save session info
+        session_info = {
+            "pot": "pot2",
+            "session_id": self.pot2_session_id,
+            "food_type": self.pot2_food_type,
+            "start_time": self.pot2_start_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "end_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "duration_sec": duration,
+            "collection_interval": self.collection_interval,
+            "completion_info": self.pot2_completion_info if self.pot2_completion_marked else None,
+            "completion_marked": self.pot2_completion_marked,
+            "cameras_used": [2, 3],
+            "total_frames_saved": self.pot2_frame_counter,
+            "raw_metadata": self.pot2_metadata,
+            "metadata_count": len(self.pot2_metadata)
+        }
+
+        # Save metadata
+        info_path = os.path.join(self.pot2_session_dir, "session_info.json")
+        with open(info_path, 'w', encoding='utf-8') as f:
+            json.dump(session_info, f, indent=2, ensure_ascii=False)
+
+        print(f"[POT2 수집] 종료: {self.pot2_frame_counter}장 저장, {duration:.1f}초")
+        print(f"[POT2 수집] 음식 종류: {self.pot2_food_type}")
+
+        # Reset session
+        self.pot2_session_id = None
+        self.pot2_start_time = None
+
+    def save_pot1_data(self, frying_left, frying_right):
+        """Save POT1 frames (cameras 0, 1)"""
+        if not self.pot1_collecting:
+            return
+
+        from datetime import datetime
+        import cv2
+
+        timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]  # HHMMss_mmm
+
+        # Save frying cameras (camera 0, 1) for POT1
+        for cam_idx, frame in [(0, frying_left), (1, frying_right)]:
+            if frame is not None:
+                # Resize to save resolution (1920x1536 -> 1280x720)
+                frame_resized = cv2.resize(frame, (SAVE_WIDTH, SAVE_HEIGHT), interpolation=cv2.INTER_LINEAR)
+                save_path = os.path.join(self.pot1_session_dir, f"camera_{cam_idx}", f"camera_{cam_idx}_{timestamp}.jpg")
+                cv2.imwrite(save_path, frame_resized, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                self.pot1_frame_counter += 1
+
+        if self.pot1_frame_counter % 10 == 0:
+            print(f"[POT1 수집] {self.pot1_frame_counter}장 저장됨")
+
+    def save_pot2_data(self, observe_left, observe_right):
+        """Save POT2 frames (cameras 2, 3)"""
+        if not self.pot2_collecting:
+            return
+
+        from datetime import datetime
+        import cv2
+
+        timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]  # HHMMss_mmm
+
+        # Save observe cameras (camera 2, 3) for POT2
+        for cam_idx, frame in [(2, observe_left), (3, observe_right)]:
+            if frame is not None:
+                # Resize to save resolution (1920x1536 -> 1280x720)
+                frame_resized = cv2.resize(frame, (SAVE_WIDTH, SAVE_HEIGHT), interpolation=cv2.INTER_LINEAR)
+                save_path = os.path.join(self.pot2_session_dir, f"camera_{cam_idx}", f"camera_{cam_idx}_{timestamp}.jpg")
+                cv2.imwrite(save_path, frame_resized, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                self.pot2_frame_counter += 1
+
+        if self.pot2_frame_counter % 10 == 0:
+            print(f"[POT2 수집] {self.pot2_frame_counter}장 저장됨")
+
     def save_collection_data(self, frying_left, frying_right, observe_left, observe_right):
-        """Save frames from all 4 cameras during data collection"""
+        """Save frames from all 4 cameras during data collection (LEGACY)"""
         if not self.data_collection_active:
             return
 

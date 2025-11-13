@@ -121,9 +121,11 @@ DEVICE_LOCATION = config.get('device_location', 'kitchen_stirfry')
 MQTT_ENABLED = config.get('mqtt_enabled', False)
 MQTT_BROKER = config.get('mqtt_broker', 'localhost')
 MQTT_PORT = config.get('mqtt_port', 1883)
-# MQTT Topics (subscribed by Jetson)
-MQTT_TOPIC_STIRFRY_FOOD_TYPE = config.get('mqtt_topic_stirfry_food_type', 'stirfry/food_type')
-MQTT_TOPIC_STIRFRY_CONTROL = config.get('mqtt_topic_stirfry_control', 'stirfry/control')
+# MQTT Topics (subscribed by Jetson) - Pot1 and Pot2 separately
+MQTT_TOPIC_STIRFRY_POT1_FOOD_TYPE = config.get('mqtt_topic_stirfry_pot1_food_type', 'stirfry/pot1/food_type')
+MQTT_TOPIC_STIRFRY_POT1_CONTROL = config.get('mqtt_topic_stirfry_pot1_control', 'stirfry/pot1/control')
+MQTT_TOPIC_STIRFRY_POT2_FOOD_TYPE = config.get('mqtt_topic_stirfry_pot2_food_type', 'stirfry/pot2/food_type')
+MQTT_TOPIC_STIRFRY_POT2_CONTROL = config.get('mqtt_topic_stirfry_pot2_control', 'stirfry/pot2/control')
 # MQTT Topics (published by Jetson)
 MQTT_TOPIC_SYSTEM_AI_MODE = config.get('mqtt_topic_ai_mode', f"{DEVICE_ID}/system/ai_mode")
 MQTT_TOPIC_STIRFRY_STATUS = f"{DEVICE_ID}/stirfry/status"
@@ -251,17 +253,23 @@ class IntegratedMonitorApp:
         self.child_processes = []
         self.vibration_process = None  # 진동센서 프로세스 추적
 
-        # Recording state
-        self.stirfry_recording = False
-        self.stirfry_left_frame_count = 0
-        self.stirfry_right_frame_count = 0
-        self.stirfry_frame_skip_counter = 0
-        # Food type from MQTT
-        self.current_stirfry_food_type = "unknown"
-        # Session management (Jetson2 style)
-        self.stirfry_session_id = None
-        self.stirfry_session_start_time = None
-        self.stirfry_metadata = []  # Store metadata during recording
+        # Stir-fry monitoring state - POT1 (left camera = camera_0)
+        self.stirfry_pot1_recording = False
+        self.stirfry_pot1_frame_count = 0
+        self.stirfry_pot1_frame_skip_counter = 0
+        self.stirfry_pot1_food_type = "unknown"
+        self.stirfry_pot1_metadata = []
+        self.stirfry_pot1_session_id = None
+        self.stirfry_pot1_session_start_time = None
+
+        # Stir-fry monitoring state - POT2 (right camera = camera_1)
+        self.stirfry_pot2_recording = False
+        self.stirfry_pot2_frame_count = 0
+        self.stirfry_pot2_frame_skip_counter = 0
+        self.stirfry_pot2_food_type = "unknown"
+        self.stirfry_pot2_metadata = []
+        self.stirfry_pot2_session_id = None
+        self.stirfry_pot2_session_start_time = None
         self.developer_mode = False
         self.snapshot_count = 0
         self.shutdown_tap_count = 0
@@ -779,9 +787,11 @@ class IntegratedMonitorApp:
                 system_info=self.system_info.to_dict()
             )
 
-            # Subscribe to food type and control topics (from Robot PC)
-            self.mqtt_client.subscribe(MQTT_TOPIC_STIRFRY_FOOD_TYPE, self.on_stirfry_food_type)
-            self.mqtt_client.subscribe(MQTT_TOPIC_STIRFRY_CONTROL, self.on_stirfry_control)
+            # Subscribe to pot1 and pot2 topics separately (from Robot PC)
+            self.mqtt_client.subscribe(MQTT_TOPIC_STIRFRY_POT1_FOOD_TYPE, self.on_stirfry_pot1_food_type)
+            self.mqtt_client.subscribe(MQTT_TOPIC_STIRFRY_POT1_CONTROL, self.on_stirfry_pot1_control)
+            self.mqtt_client.subscribe(MQTT_TOPIC_STIRFRY_POT2_FOOD_TYPE, self.on_stirfry_pot2_food_type)
+            self.mqtt_client.subscribe(MQTT_TOPIC_STIRFRY_POT2_CONTROL, self.on_stirfry_pot2_control)
 
             # Subscribe to vibration control topic
             self.mqtt_client.subscribe("calibration/vibration/control", self.on_vibration_control)
@@ -791,7 +801,10 @@ class IntegratedMonitorApp:
                 print(f"[MQTT] 연결 성공: {MQTT_BROKER}:{MQTT_PORT}")
                 print(f"[MQTT] Device: {DEVICE_ID} ({DEVICE_NAME}) @ {get_ip_address()}")
                 print(f"[MQTT] 구독 토픽 (로봇→Jetson):")
-                print(f"  - {MQTT_TOPIC_STIRFRY_FOOD_TYPE}")
+                print(f"  - {MQTT_TOPIC_STIRFRY_POT1_FOOD_TYPE}")
+                print(f"  - {MQTT_TOPIC_STIRFRY_POT1_CONTROL}")
+                print(f"  - {MQTT_TOPIC_STIRFRY_POT2_FOOD_TYPE}")
+                print(f"  - {MQTT_TOPIC_STIRFRY_POT2_CONTROL}")
                 print(f"  - calibration/vibration/control")
                 print(f"[MQTT] 발행 토픽 (Jetson→로봇):")
                 print(f"  - {MQTT_TOPIC_SYSTEM_AI_MODE}")
@@ -811,42 +824,79 @@ class IntegratedMonitorApp:
             print(f"[MQTT] 초기화 실패: {e}")
             self.auto_mqtt_label.config(text=f"MQTT: 오류", fg=COLOR_ERROR)
 
-    def on_stirfry_food_type(self, client, userdata, message):
-        """MQTT callback for stir-fry food type - AUTO START recording"""
+    def on_stirfry_pot1_food_type(self, client, userdata, message):
+        """MQTT callback for pot1 food type - AUTO START recording"""
         try:
-            self.current_stirfry_food_type = message.payload.decode()
-            print(f"[MQTT] 볶음 음식 종류 수신: {self.current_stirfry_food_type}")
+            self.stirfry_pot1_food_type = message.payload.decode()
+            print(f"[MQTT POT1] 볶음 음식 종류 수신: {self.stirfry_pot1_food_type}")
 
             # AUTO START: If not recording, start automatically
-            if not self.stirfry_recording:
-                print(f"[MQTT] 자동 녹화 시작 - 음식: {self.current_stirfry_food_type}")
-                self.root.after(0, self.start_stirfry_recording)
+            if not self.stirfry_pot1_recording:
+                print(f"[MQTT POT1] 자동 녹화 시작 - 음식: {self.stirfry_pot1_food_type}")
+                self.root.after(0, self.start_stirfry_pot1_recording)
             else:
                 # If already recording, store as metadata event
                 from datetime import datetime
-                self.stirfry_metadata.append({
+                self.stirfry_pot1_metadata.append({
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                     "type": "food_type_change",
-                    "value": self.current_stirfry_food_type
+                    "value": self.stirfry_pot1_food_type
                 })
-                print(f"[MQTT] 녹화 중 음식 종류 변경: {self.current_stirfry_food_type}")
+                print(f"[MQTT POT1] 녹화 중 음식 종류 변경: {self.stirfry_pot1_food_type}")
         except Exception as e:
-            print(f"[MQTT] 음식 종류 수신 오류: {e}")
+            print(f"[MQTT POT1] 음식 종류 수신 오류: {e}")
 
-    def on_stirfry_control(self, client, userdata, message):
-        """MQTT callback for stir-fry control commands - AUTO STOP"""
+    def on_stirfry_pot1_control(self, client, userdata, message):
+        """MQTT callback for pot1 control commands - AUTO STOP"""
         try:
             command = message.payload.decode().strip().lower()
-            print(f"[MQTT] 볶음 제어 명령 수신: {command}")
+            print(f"[MQTT POT1] 볶음 제어 명령 수신: {command}")
 
             if command == "stop":
-                if self.stirfry_recording:
-                    print(f"[MQTT] 자동 녹화 중지")
-                    self.root.after(0, self.stop_stirfry_recording)
+                if self.stirfry_pot1_recording:
+                    print(f"[MQTT POT1] 자동 녹화 중지")
+                    self.root.after(0, self.stop_stirfry_pot1_recording)
                 else:
-                    print(f"[MQTT] 녹화 중이 아님 - 무시")
+                    print(f"[MQTT POT1] 녹화 중이 아님 - 무시")
         except Exception as e:
-            print(f"[MQTT] 제어 명령 수신 오류: {e}")
+            print(f"[MQTT POT1] 제어 명령 수신 오류: {e}")
+
+    def on_stirfry_pot2_food_type(self, client, userdata, message):
+        """MQTT callback for pot2 food type - AUTO START recording"""
+        try:
+            self.stirfry_pot2_food_type = message.payload.decode()
+            print(f"[MQTT POT2] 볶음 음식 종류 수신: {self.stirfry_pot2_food_type}")
+
+            # AUTO START: If not recording, start automatically
+            if not self.stirfry_pot2_recording:
+                print(f"[MQTT POT2] 자동 녹화 시작 - 음식: {self.stirfry_pot2_food_type}")
+                self.root.after(0, self.start_stirfry_pot2_recording)
+            else:
+                # If already recording, store as metadata event
+                from datetime import datetime
+                self.stirfry_pot2_metadata.append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                    "type": "food_type_change",
+                    "value": self.stirfry_pot2_food_type
+                })
+                print(f"[MQTT POT2] 녹화 중 음식 종류 변경: {self.stirfry_pot2_food_type}")
+        except Exception as e:
+            print(f"[MQTT POT2] 음식 종류 수신 오류: {e}")
+
+    def on_stirfry_pot2_control(self, client, userdata, message):
+        """MQTT callback for pot2 control commands - AUTO STOP"""
+        try:
+            command = message.payload.decode().strip().lower()
+            print(f"[MQTT POT2] 볶음 제어 명령 수신: {command}")
+
+            if command == "stop":
+                if self.stirfry_pot2_recording:
+                    print(f"[MQTT POT2] 자동 녹화 중지")
+                    self.root.after(0, self.stop_stirfry_pot2_recording)
+                else:
+                    print(f"[MQTT POT2] 녹화 중이 아님 - 무시")
+        except Exception as e:
+            print(f"[MQTT POT2] 제어 명령 수신 오류: {e}")
 
     def init_cameras(self):
         """Initialize cameras based on enabled settings"""
@@ -1222,8 +1272,8 @@ class IntegratedMonitorApp:
             self.root.after(50, self.update_stirfry_left_camera)
             return
 
-        # If recording, save frames (skip frames to prevent freezing + save storage)
-        if self.stirfry_recording:
+        # If recording POT1, save frames (skip frames to prevent freezing + save storage)
+        if self.stirfry_pot1_recording:
             # Each camera manages its own counter independently
             if not hasattr(self, 'stirfry_left_skip_counter'):
                 self.stirfry_left_skip_counter = 0
@@ -1232,8 +1282,8 @@ class IntegratedMonitorApp:
             # Save every Nth frame (configurable via STIRFRY_FRAME_SKIP)
             if self.stirfry_left_skip_counter >= STIRFRY_FRAME_SKIP:
                 # Debug: First save notification
-                if self.stirfry_left_frame_count == 0:
-                    print("[볶음 왼쪽] 첫 프레임 저장 시작...")
+                if self.stirfry_pot1_frame_count == 0:
+                    print("[볶음 POT1] 첫 프레임 저장 시작...")
                 # Save in background thread to prevent GUI blocking
                 threading.Thread(target=self.save_stirfry_left_frame, args=(frame.copy(),), daemon=True).start()
                 self.stirfry_left_skip_counter = 0  # Reset counter after saving
@@ -1263,8 +1313,8 @@ class IntegratedMonitorApp:
             self.root.after(50, self.update_stirfry_right_camera)
             return
 
-        # If recording, save frames (skip frames to prevent freezing + save storage)
-        if self.stirfry_recording:
+        # If recording POT2, save frames (skip frames to prevent freezing + save storage)
+        if self.stirfry_pot2_recording:
             # Each camera manages its own counter independently
             if not hasattr(self, 'stirfry_right_skip_counter'):
                 self.stirfry_right_skip_counter = 0
@@ -1273,8 +1323,8 @@ class IntegratedMonitorApp:
             # Save every Nth frame (configurable via STIRFRY_FRAME_SKIP)
             if self.stirfry_right_skip_counter >= STIRFRY_FRAME_SKIP:
                 # Debug: First save notification
-                if self.stirfry_right_frame_count == 0:
-                    print("[볶음 오른쪽] 첫 프레임 저장 시작...")
+                if self.stirfry_pot2_frame_count == 0:
+                    print("[볶음 POT2] 첫 프레임 저장 시작...")
                 # Save in background thread to prevent GUI blocking
                 threading.Thread(target=self.save_stirfry_right_frame, args=(frame.copy(),), daemon=True).start()
                 self.stirfry_right_skip_counter = 0  # Reset counter after saving
@@ -1617,15 +1667,15 @@ class IntegratedMonitorApp:
             print(f"[오류] 스냅샷 저장 실패: {e}")
 
     def save_stirfry_left_frame(self, frame):
-        """Save stir-fry LEFT monitoring frame (session-based)"""
+        """Save stir-fry LEFT monitoring frame (POT1, camera_0)"""
         try:
             now = datetime.now()
             ts_name = now.strftime("%H%M%S_%f")[:-3]  # Include milliseconds
 
-            # Use session-based folder structure
+            # Use POT1 session-based folder structure with camera_0
             base_dir = os.path.expanduser(f"~/{STIRFRY_SAVE_DIR}")
-            session_dir = os.path.join(base_dir, self.stirfry_session_id, self.current_stirfry_food_type)
-            out_dir = os.path.join(session_dir, "left")
+            session_dir = os.path.join(base_dir, "pot1", self.stirfry_pot1_session_id, self.stirfry_pot1_food_type)
+            out_dir = os.path.join(session_dir, "camera_0")
 
             # Create directory with proper permissions
             os.makedirs(out_dir, mode=0o755, exist_ok=True)
@@ -1635,32 +1685,32 @@ class IntegratedMonitorApp:
             save_height = STIRFRY_SAVE_RESOLUTION['height']
             resized = cv2.resize(frame, (save_width, save_height), interpolation=cv2.INTER_AREA)
 
-            out_path = os.path.join(out_dir, f"left_{ts_name}.jpg")
+            out_path = os.path.join(out_dir, f"camera_0_{ts_name}.jpg")
             # Save with configurable JPEG quality
             cv2.imwrite(out_path, resized, [cv2.IMWRITE_JPEG_QUALITY, STIRFRY_JPEG_QUALITY])
-            self.stirfry_left_frame_count += 1
+            self.stirfry_pot1_frame_count += 1
 
             # Update GUI on main thread
-            self.root.after(0, lambda: self.stirfry_left_count_label.config(text=f"저장: {self.stirfry_left_frame_count}장"))
+            self.root.after(0, lambda: self.stirfry_left_count_label.config(text=f"POT1: {self.stirfry_pot1_frame_count}장"))
 
             # Debug log
-            if self.stirfry_left_frame_count % 10 == 0:
-                print(f"[볶음 왼쪽] {self.stirfry_left_frame_count}장 저장됨")
+            if self.stirfry_pot1_frame_count % 10 == 0:
+                print(f"[볶음 POT1] {self.stirfry_pot1_frame_count}장 저장됨")
         except Exception as e:
-            print(f"[오류] 볶음 왼쪽 프레임 저장 실패: {e}")
+            print(f"[오류] POT1 프레임 저장 실패: {e}")
             import traceback
             traceback.print_exc()
 
     def save_stirfry_right_frame(self, frame):
-        """Save stir-fry RIGHT monitoring frame (session-based)"""
+        """Save stir-fry RIGHT monitoring frame (POT2, camera_1)"""
         try:
             now = datetime.now()
             ts_name = now.strftime("%H%M%S_%f")[:-3]  # Include milliseconds
 
-            # Use session-based folder structure
+            # Use POT2 session-based folder structure with camera_1
             base_dir = os.path.expanduser(f"~/{STIRFRY_SAVE_DIR}")
-            session_dir = os.path.join(base_dir, self.stirfry_session_id, self.current_stirfry_food_type)
-            out_dir = os.path.join(session_dir, "right")
+            session_dir = os.path.join(base_dir, "pot2", self.stirfry_pot2_session_id, self.stirfry_pot2_food_type)
+            out_dir = os.path.join(session_dir, "camera_1")
 
             # Create directory with proper permissions
             os.makedirs(out_dir, mode=0o755, exist_ok=True)
@@ -1670,25 +1720,186 @@ class IntegratedMonitorApp:
             save_height = STIRFRY_SAVE_RESOLUTION['height']
             resized = cv2.resize(frame, (save_width, save_height), interpolation=cv2.INTER_AREA)
 
-            out_path = os.path.join(out_dir, f"right_{ts_name}.jpg")
+            out_path = os.path.join(out_dir, f"camera_1_{ts_name}.jpg")
             # Save with configurable JPEG quality
             cv2.imwrite(out_path, resized, [cv2.IMWRITE_JPEG_QUALITY, STIRFRY_JPEG_QUALITY])
-            self.stirfry_right_frame_count += 1
+            self.stirfry_pot2_frame_count += 1
 
             # Update GUI on main thread
-            self.root.after(0, lambda: self.stirfry_right_count_label.config(text=f"저장: {self.stirfry_right_frame_count}장"))
+            self.root.after(0, lambda: self.stirfry_right_count_label.config(text=f"POT2: {self.stirfry_pot2_frame_count}장"))
 
             # Debug log
-            if self.stirfry_right_frame_count % 10 == 0:
-                print(f"[볶음 오른쪽] {self.stirfry_right_frame_count}장 저장됨")
+            if self.stirfry_pot2_frame_count % 10 == 0:
+                print(f"[볶음 POT2] {self.stirfry_pot2_frame_count}장 저장됨")
         except Exception as e:
-            print(f"[오류] 볶음 오른쪽 프레임 저장 실패: {e}")
+            print(f"[오류] POT2 프레임 저장 실패: {e}")
             import traceback
             traceback.print_exc()
 
     # =========================
     # Control Functions
     # =========================
+    # POT1 Recording Control (Left Camera = camera_0)
+    def start_stirfry_pot1_recording(self):
+        """Start stir-fry POT1 data recording (left camera = camera_0)"""
+        from datetime import datetime
+
+        self.stirfry_pot1_recording = True
+        self.stirfry_pot1_frame_count = 0
+        self.stirfry_left_skip_counter = 0  # Reset frame skip counter
+
+        # Create session ID
+        self.stirfry_pot1_session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.stirfry_pot1_session_start_time = datetime.now()
+        self.stirfry_pot1_metadata = []  # Reset metadata
+
+        # Store initial metadata
+        self.stirfry_pot1_metadata.append({
+            "timestamp": self.stirfry_pot1_session_start_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "type": "session_start",
+            "session_id": self.stirfry_pot1_session_id,
+            "food_type": self.stirfry_pot1_food_type
+        })
+
+        print(f"[볶음 POT1] 녹화 시작 - 세션: {self.stirfry_pot1_session_id}, 음식: {self.stirfry_pot1_food_type}")
+
+    def stop_stirfry_pot1_recording(self):
+        """Stop stir-fry POT1 data recording (left camera = camera_0)"""
+        from datetime import datetime
+        import json
+
+        self.stirfry_pot1_recording = False
+        self.stirfry_left_skip_counter = 0  # Reset frame skip counter
+
+        # Add session end metadata
+        if self.stirfry_pot1_session_start_time:
+            session_end_time = datetime.now()
+            duration = (session_end_time - self.stirfry_pot1_session_start_time).total_seconds()
+
+            self.stirfry_pot1_metadata.append({
+                "timestamp": session_end_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "type": "session_end",
+                "duration_seconds": duration,
+                "frame_count": self.stirfry_pot1_frame_count
+            })
+
+            # Save metadata JSON file
+            try:
+                base_dir = os.path.expanduser(f"~/{STIRFRY_SAVE_DIR}")
+                metadata_dir = os.path.join(base_dir, "pot1", self.stirfry_pot1_session_id, self.stirfry_pot1_food_type)
+                os.makedirs(metadata_dir, mode=0o755, exist_ok=True)
+
+                metadata_file = os.path.join(metadata_dir, "metadata.json")
+                metadata_content = {
+                    "pot": "pot1",
+                    "session_id": self.stirfry_pot1_session_id,
+                    "food_type": self.stirfry_pot1_food_type,
+                    "start_time": self.stirfry_pot1_session_start_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "end_time": session_end_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "duration_seconds": duration,
+                    "frame_count": self.stirfry_pot1_frame_count,
+                    "resolution": {
+                        "width": STIRFRY_SAVE_RESOLUTION['width'],
+                        "height": STIRFRY_SAVE_RESOLUTION['height']
+                    },
+                    "jpeg_quality": STIRFRY_JPEG_QUALITY,
+                    "frame_skip": STIRFRY_FRAME_SKIP,
+                    "device_id": DEVICE_ID,
+                    "device_name": DEVICE_NAME,
+                    "camera": "camera_0",
+                    "events": self.stirfry_pot1_metadata
+                }
+
+                with open(metadata_file, 'w', encoding='utf-8') as f:
+                    json.dump(metadata_content, f, ensure_ascii=False, indent=2)
+
+                print(f"[볶음 POT1] 메타데이터 저장 완료: {metadata_file}")
+            except Exception as e:
+                print(f"[오류] POT1 메타데이터 저장 실패: {e}")
+
+        print(f"[볶음 POT1] 녹화 중지 - 프레임: {self.stirfry_pot1_frame_count}장")
+
+    # POT2 Recording Control (Right Camera = camera_1)
+    def start_stirfry_pot2_recording(self):
+        """Start stir-fry POT2 data recording (right camera = camera_1)"""
+        from datetime import datetime
+
+        self.stirfry_pot2_recording = True
+        self.stirfry_pot2_frame_count = 0
+        self.stirfry_right_skip_counter = 0  # Reset frame skip counter
+
+        # Create session ID
+        self.stirfry_pot2_session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.stirfry_pot2_session_start_time = datetime.now()
+        self.stirfry_pot2_metadata = []  # Reset metadata
+
+        # Store initial metadata
+        self.stirfry_pot2_metadata.append({
+            "timestamp": self.stirfry_pot2_session_start_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "type": "session_start",
+            "session_id": self.stirfry_pot2_session_id,
+            "food_type": self.stirfry_pot2_food_type
+        })
+
+        print(f"[볶음 POT2] 녹화 시작 - 세션: {self.stirfry_pot2_session_id}, 음식: {self.stirfry_pot2_food_type}")
+
+    def stop_stirfry_pot2_recording(self):
+        """Stop stir-fry POT2 data recording (right camera = camera_1)"""
+        from datetime import datetime
+        import json
+
+        self.stirfry_pot2_recording = False
+        self.stirfry_right_skip_counter = 0  # Reset frame skip counter
+
+        # Add session end metadata
+        if self.stirfry_pot2_session_start_time:
+            session_end_time = datetime.now()
+            duration = (session_end_time - self.stirfry_pot2_session_start_time).total_seconds()
+
+            self.stirfry_pot2_metadata.append({
+                "timestamp": session_end_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "type": "session_end",
+                "duration_seconds": duration,
+                "frame_count": self.stirfry_pot2_frame_count
+            })
+
+            # Save metadata JSON file
+            try:
+                base_dir = os.path.expanduser(f"~/{STIRFRY_SAVE_DIR}")
+                metadata_dir = os.path.join(base_dir, "pot2", self.stirfry_pot2_session_id, self.stirfry_pot2_food_type)
+                os.makedirs(metadata_dir, mode=0o755, exist_ok=True)
+
+                metadata_file = os.path.join(metadata_dir, "metadata.json")
+                metadata_content = {
+                    "pot": "pot2",
+                    "session_id": self.stirfry_pot2_session_id,
+                    "food_type": self.stirfry_pot2_food_type,
+                    "start_time": self.stirfry_pot2_session_start_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "end_time": session_end_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "duration_seconds": duration,
+                    "frame_count": self.stirfry_pot2_frame_count,
+                    "resolution": {
+                        "width": STIRFRY_SAVE_RESOLUTION['width'],
+                        "height": STIRFRY_SAVE_RESOLUTION['height']
+                    },
+                    "jpeg_quality": STIRFRY_JPEG_QUALITY,
+                    "frame_skip": STIRFRY_FRAME_SKIP,
+                    "device_id": DEVICE_ID,
+                    "device_name": DEVICE_NAME,
+                    "camera": "camera_1",
+                    "events": self.stirfry_pot2_metadata
+                }
+
+                with open(metadata_file, 'w', encoding='utf-8') as f:
+                    json.dump(metadata_content, f, ensure_ascii=False, indent=2)
+
+                print(f"[볶음 POT2] 메타데이터 저장 완료: {metadata_file}")
+            except Exception as e:
+                print(f"[오류] POT2 메타데이터 저장 실패: {e}")
+
+        print(f"[볶음 POT2] 녹화 중지 - 프레임: {self.stirfry_pot2_frame_count}장")
+
+    # LEGACY: Old combined recording functions (kept for backward compatibility)
     def start_stirfry_recording(self):
         """Start stir-fry data recording for BOTH cameras"""
         from datetime import datetime
