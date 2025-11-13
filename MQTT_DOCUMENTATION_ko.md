@@ -20,8 +20,9 @@ MQTT 브로커 (localhost:1883)
 │   └── POT2: 오른쪽 카메라 (camera_1)
 │
 └── 젯슨 2 (MQTT 구독자 + 발행자)
-    ├── POT1: 카메라 0,1 (튀김 왼쪽/오른쪽)
-    └── POT2: 카메라 2,3 (관찰 왼쪽/오른쪽)
+    ├── POT1: 카메라 0 (튀김 왼쪽), 2 (관찰 왼쪽), 3 (관찰 오른쪽)
+    └── POT2: 카메라 1 (튀김 오른쪽), 2 (관찰 왼쪽), 3 (관찰 오른쪽)
+    참고: 관찰 카메라 (2, 3)는 공유됨 - POT1 또는 POT2 중 하나라도 활성화되면 저장됨
 ```
 
 ---
@@ -393,24 +394,32 @@ sequenceDiagram
 ├── pot1/
 │   └── session_20250114_143052/
 │       └── chicken/
-│           ├── camera_0/
+│           ├── camera_0/  (튀김 왼쪽 - POT1 메인 카메라)
 │           │   ├── camera_0_143052_123.jpg
 │           │   └── ...
-│           ├── camera_1/
-│           │   ├── camera_1_143052_123.jpg
+│           ├── camera_2/  (관찰 왼쪽 - 공유)
+│           │   ├── camera_2_143052_123.jpg
+│           │   └── ...
+│           ├── camera_3/  (관찰 오른쪽 - 공유)
+│           │   ├── camera_3_143052_123.jpg
 │           │   └── ...
 │           └── session_info.json
 └── pot2/
     └── session_20250114_143100/
         └── shrimp/
-            ├── camera_2/
+            ├── camera_1/  (튀김 오른쪽 - POT2 메인 카메라)
+            │   ├── camera_1_143100_789.jpg
+            │   └── ...
+            ├── camera_2/  (관찰 왼쪽 - 공유)
             │   ├── camera_2_143100_789.jpg
             │   └── ...
-            ├── camera_3/
+            ├── camera_3/  (관찰 오른쪽 - 공유)
             │   ├── camera_3_143100_789.jpg
             │   └── ...
             └── session_info.json
 ```
+
+**참고**: 관찰 카메라 (camera_2, camera_3)는 POT1과 POT2 세션 모두에 저장됩니다. 어느 솥이든 활성화되면 두 관찰 카메라 모두 해당 솥의 세션 디렉토리에 데이터를 저장합니다.
 
 ---
 
@@ -472,7 +481,7 @@ sequenceDiagram
     "oil_temp": 180.0,
     "elapsed_time_sec": 203.2
   },
-  "cameras_used": [0, 1],
+  "cameras_used": [0, 2, 3],
   "total_frames_saved": 350,
   "raw_metadata": [
     {

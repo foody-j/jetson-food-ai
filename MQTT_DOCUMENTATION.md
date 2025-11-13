@@ -20,8 +20,9 @@ MQTT Broker (localhost:1883)
 │   └── POT2: Right Camera (camera_1)
 │
 └── Jetson 2 (MQTT Subscriber + Publisher)
-    ├── POT1: Cameras 0,1 (frying left/right)
-    └── POT2: Cameras 2,3 (observe left/right)
+    ├── POT1: Cameras 0 (frying left), 2 (observe left), 3 (observe right)
+    └── POT2: Cameras 1 (frying right), 2 (observe left), 3 (observe right)
+    Note: Observe cameras (2, 3) are shared - they save when either POT1 or POT2 is active
 ```
 
 ---
@@ -393,24 +394,32 @@ sequenceDiagram
 ├── pot1/
 │   └── session_20250114_143052/
 │       └── chicken/
-│           ├── camera_0/
+│           ├── camera_0/  (frying left - POT1 main camera)
 │           │   ├── camera_0_143052_123.jpg
 │           │   └── ...
-│           ├── camera_1/
-│           │   ├── camera_1_143052_123.jpg
+│           ├── camera_2/  (observe left - shared)
+│           │   ├── camera_2_143052_123.jpg
+│           │   └── ...
+│           ├── camera_3/  (observe right - shared)
+│           │   ├── camera_3_143052_123.jpg
 │           │   └── ...
 │           └── session_info.json
 └── pot2/
     └── session_20250114_143100/
         └── shrimp/
-            ├── camera_2/
+            ├── camera_1/  (frying right - POT2 main camera)
+            │   ├── camera_1_143100_789.jpg
+            │   └── ...
+            ├── camera_2/  (observe left - shared)
             │   ├── camera_2_143100_789.jpg
             │   └── ...
-            ├── camera_3/
+            ├── camera_3/  (observe right - shared)
             │   ├── camera_3_143100_789.jpg
             │   └── ...
             └── session_info.json
 ```
+
+**Note**: Observe cameras (camera_2, camera_3) are saved for both POT1 and POT2 sessions. When either pot is active, both observe cameras record data to that pot's session directory.
 
 ---
 
@@ -472,7 +481,7 @@ sequenceDiagram
     "oil_temp": 180.0,
     "elapsed_time_sec": 203.2
   },
-  "cameras_used": [0, 1],
+  "cameras_used": [0, 2, 3],
   "total_frames_saved": 350,
   "raw_metadata": [
     {

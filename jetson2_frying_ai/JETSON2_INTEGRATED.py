@@ -1328,10 +1328,11 @@ class JetsonIntegratedApp:
                 self.pot1_timer += GUI_UPDATE_INTERVAL / 1000.0
                 if self.pot1_timer >= self.collection_interval:
                     self.pot1_timer = 0
-                    # Trigger POT1 data collection (cameras 0, 1)
+                    # Trigger POT1 data collection (cameras 0, 2, 3)
                     self.save_pot1_data(
                         self.latest_frying_left_frame,
-                        self.latest_frying_right_frame
+                        self.latest_observe_left_frame,
+                        self.latest_observe_right_frame
                     )
 
             # LEGACY: Data collection timer (shared across all active cameras)
@@ -1578,8 +1579,9 @@ class JetsonIntegratedApp:
                 self.pot2_timer += GUI_UPDATE_INTERVAL / 1000.0
                 if self.pot2_timer >= self.collection_interval:
                     self.pot2_timer = 0
-                    # Trigger POT2 data collection (cameras 2, 3)
+                    # Trigger POT2 data collection (cameras 1, 2, 3)
                     self.save_pot2_data(
+                        self.latest_frying_right_frame,
                         self.latest_observe_left_frame,
                         self.latest_observe_right_frame
                     )
@@ -2209,7 +2211,7 @@ class JetsonIntegratedApp:
 
     # POT1/POT2 Separate Collection Functions
     def start_pot1_collection(self):
-        """Start POT1 data collection (cameras 0, 1)"""
+        """Start POT1 data collection (cameras 0, 2, 3)"""
         from datetime import datetime
         import os
 
@@ -2223,7 +2225,7 @@ class JetsonIntegratedApp:
         base_dir = os.path.expanduser("~/AI_Data/FryingData")
         self.pot1_session_dir = os.path.join(base_dir, "pot1", self.pot1_session_id, self.pot1_food_type)
 
-        for cam_idx in [0, 1]:
+        for cam_idx in [0, 2, 3]:
             os.makedirs(os.path.join(self.pot1_session_dir, f"camera_{cam_idx}"), mode=0o755, exist_ok=True)
 
         # Reset completion flags
@@ -2262,7 +2264,7 @@ class JetsonIntegratedApp:
             "collection_interval": self.collection_interval,
             "completion_info": self.pot1_completion_info if self.pot1_completion_marked else None,
             "completion_marked": self.pot1_completion_marked,
-            "cameras_used": [0, 1],
+            "cameras_used": [0, 2, 3],
             "total_frames_saved": self.pot1_frame_counter,
             "raw_metadata": self.pot1_metadata,
             "metadata_count": len(self.pot1_metadata)
@@ -2281,7 +2283,7 @@ class JetsonIntegratedApp:
         self.pot1_start_time = None
 
     def start_pot2_collection(self):
-        """Start POT2 data collection (cameras 2, 3)"""
+        """Start POT2 data collection (cameras 1, 2, 3)"""
         from datetime import datetime
         import os
 
@@ -2295,7 +2297,7 @@ class JetsonIntegratedApp:
         base_dir = os.path.expanduser("~/AI_Data/FryingData")
         self.pot2_session_dir = os.path.join(base_dir, "pot2", self.pot2_session_id, self.pot2_food_type)
 
-        for cam_idx in [2, 3]:
+        for cam_idx in [1, 2, 3]:
             os.makedirs(os.path.join(self.pot2_session_dir, f"camera_{cam_idx}"), mode=0o755, exist_ok=True)
 
         # Reset completion flags
@@ -2334,7 +2336,7 @@ class JetsonIntegratedApp:
             "collection_interval": self.collection_interval,
             "completion_info": self.pot2_completion_info if self.pot2_completion_marked else None,
             "completion_marked": self.pot2_completion_marked,
-            "cameras_used": [2, 3],
+            "cameras_used": [1, 2, 3],
             "total_frames_saved": self.pot2_frame_counter,
             "raw_metadata": self.pot2_metadata,
             "metadata_count": len(self.pot2_metadata)
@@ -2352,8 +2354,8 @@ class JetsonIntegratedApp:
         self.pot2_session_id = None
         self.pot2_start_time = None
 
-    def save_pot1_data(self, frying_left, frying_right):
-        """Save POT1 frames (cameras 0, 1)"""
+    def save_pot1_data(self, frying_left, observe_left, observe_right):
+        """Save POT1 frames (cameras 0, 2, 3)"""
         if not self.pot1_collecting:
             return
 
@@ -2362,8 +2364,8 @@ class JetsonIntegratedApp:
 
         timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]  # HHMMss_mmm
 
-        # Save frying cameras (camera 0, 1) for POT1
-        for cam_idx, frame in [(0, frying_left), (1, frying_right)]:
+        # Save POT1 cameras: camera_0 (frying left), camera_2 (observe left), camera_3 (observe right)
+        for cam_idx, frame in [(0, frying_left), (2, observe_left), (3, observe_right)]:
             if frame is not None:
                 # Resize to save resolution (1920x1536 -> 1280x720)
                 frame_resized = cv2.resize(frame, (SAVE_WIDTH, SAVE_HEIGHT), interpolation=cv2.INTER_LINEAR)
@@ -2374,8 +2376,8 @@ class JetsonIntegratedApp:
         if self.pot1_frame_counter % 10 == 0:
             print(f"[POT1 수집] {self.pot1_frame_counter}장 저장됨")
 
-    def save_pot2_data(self, observe_left, observe_right):
-        """Save POT2 frames (cameras 2, 3)"""
+    def save_pot2_data(self, frying_right, observe_left, observe_right):
+        """Save POT2 frames (cameras 1, 2, 3)"""
         if not self.pot2_collecting:
             return
 
@@ -2384,8 +2386,8 @@ class JetsonIntegratedApp:
 
         timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]  # HHMMss_mmm
 
-        # Save observe cameras (camera 2, 3) for POT2
-        for cam_idx, frame in [(2, observe_left), (3, observe_right)]:
+        # Save POT2 cameras: camera_1 (frying right), camera_2 (observe left), camera_3 (observe right)
+        for cam_idx, frame in [(1, frying_right), (2, observe_left), (3, observe_right)]:
             if frame is not None:
                 # Resize to save resolution (1920x1536 -> 1280x720)
                 frame_resized = cv2.resize(frame, (SAVE_WIDTH, SAVE_HEIGHT), interpolation=cv2.INTER_LINEAR)
