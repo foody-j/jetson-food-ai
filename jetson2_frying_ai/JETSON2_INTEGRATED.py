@@ -1276,24 +1276,24 @@ class JetsonIntegratedApp:
                             mask_3ch = cv2.cvtColor(result.food_mask, cv2.COLOR_GRAY2BGR)
                             vis = cv2.addWeighted(vis, 0.7, cv2.bitwise_and(green_overlay, mask_3ch), 0.3, 0)
 
-                        # Extract color features
-                        feat = result.color_features
-                        brown_pct = int(feat.brown_ratio * 100)
-                        golden_pct = int(feat.golden_ratio * 100)
-                        area_pct = int(result.food_area_ratio * 100)
+                        # Extract color features (kept for future use, not displayed)
+                        # feat = result.color_features
+                        # brown_pct = int(feat.brown_ratio * 100)
+                        # golden_pct = int(feat.golden_ratio * 100)
+                        # area_pct = int(result.food_area_ratio * 100)
 
-                        # Draw features on frame
-                        cv2.putText(vis, f"Brown: {brown_pct}%", (16, 40),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (60, 120, 200), 2)
-                        cv2.putText(vis, f"Golden: {golden_pct}%", (16, 80),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 200, 255), 2)
-                        cv2.putText(vis, f"Area: {area_pct}%", (16, 120),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
+                        # Draw features on frame - DISABLED per user request
+                        # cv2.putText(vis, f"Brown: {brown_pct}%", (16, 40),
+                        #             cv2.FONT_HERSHEY_SIMPLEX, 1, (60, 120, 200), 2)
+                        # cv2.putText(vis, f"Golden: {golden_pct}%", (16, 80),
+                        #             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 200, 255), 2)
+                        # cv2.putText(vis, f"Area: {area_pct}%", (16, 120),
+                        #             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
 
-                        # Update GUI labels
-                        self.frying_left_color_label.config(
-                            text=f"갈색: {brown_pct}% | 황금: {golden_pct}%"
-                        )
+                        # Update GUI labels - DISABLED per user request
+                        # self.frying_left_color_label.config(
+                        #     text=f"갈색: {brown_pct}% | 황금: {golden_pct}%"
+                        # )
                     except:
                         pass
 
@@ -1386,24 +1386,24 @@ class JetsonIntegratedApp:
                             mask_3ch = cv2.cvtColor(result.food_mask, cv2.COLOR_GRAY2BGR)
                             vis = cv2.addWeighted(vis, 0.7, cv2.bitwise_and(green_overlay, mask_3ch), 0.3, 0)
 
-                        # Extract color features
-                        feat = result.color_features
-                        brown_pct = int(feat.brown_ratio * 100)
-                        golden_pct = int(feat.golden_ratio * 100)
-                        area_pct = int(result.food_area_ratio * 100)
+                        # Extract color features (kept for future use, not displayed)
+                        # feat = result.color_features
+                        # brown_pct = int(feat.brown_ratio * 100)
+                        # golden_pct = int(feat.golden_ratio * 100)
+                        # area_pct = int(result.food_area_ratio * 100)
 
-                        # Draw features on frame
-                        cv2.putText(vis, f"Brown: {brown_pct}%", (16, 40),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (60, 120, 200), 2)
-                        cv2.putText(vis, f"Golden: {golden_pct}%", (16, 80),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 200, 255), 2)
-                        cv2.putText(vis, f"Area: {area_pct}%", (16, 120),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
+                        # Draw features on frame - DISABLED per user request
+                        # cv2.putText(vis, f"Brown: {brown_pct}%", (16, 40),
+                        #             cv2.FONT_HERSHEY_SIMPLEX, 1, (60, 120, 200), 2)
+                        # cv2.putText(vis, f"Golden: {golden_pct}%", (16, 80),
+                        #             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 200, 255), 2)
+                        # cv2.putText(vis, f"Area: {area_pct}%", (16, 120),
+                        #             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
 
-                        # Update GUI labels
-                        self.frying_right_color_label.config(
-                            text=f"갈색: {brown_pct}% | 황금: {golden_pct}%"
-                        )
+                        # Update GUI labels - DISABLED per user request
+                        # self.frying_right_color_label.config(
+                        #     text=f"갈색: {brown_pct}% | 황금: {golden_pct}%"
+                        # )
                     except:
                         pass
 
