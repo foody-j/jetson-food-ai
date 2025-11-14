@@ -5,11 +5,11 @@ Wants=sensing-camera.service
 
 [Service]
 Type=simple
-User=dkuyj
-WorkingDirectory=/home/dkuyj/jetson-camera-monitor/jetson2_frying_ai
+User=yjk
+WorkingDirectory=/home/yjk/jetson-food-ai/jetson2_frying_ai
 Environment="DISPLAY=:0"
-Environment="XAUTHORITY=/home/dkuyj/.Xauthority"
-ExecStart=/usr/bin/python3 /home/dkuyj/jetson-camera-monitor/jetson2_frying_ai/JETSON2_INTEGRATED.py
+Environment="XAUTHORITY=/home/yjk/.Xauthority"
+ExecStart=/usr/bin/python3 /home/yjk/jetson-food-ai/jetson2_frying_ai/JETSON2_INTEGRATED.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
