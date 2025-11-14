@@ -830,12 +830,11 @@ class JetsonIntegratedApp:
         self.content_frame = tk.Frame(self.root, bg=COLOR_BG)
         self.content_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Configure grid weights (4 rows x 1 column for vertical layout)
-        self.content_frame.rowconfigure(0, weight=1)  # Frying Left
-        self.content_frame.rowconfigure(1, weight=1)  # Frying Right
-        self.content_frame.rowconfigure(2, weight=1)  # Observe Left
-        self.content_frame.rowconfigure(3, weight=1)  # Observe Right
-        self.content_frame.columnconfigure(0, weight=1)  # Single column
+        # Configure grid weights (2 rows x 2 columns for 2x2 grid layout)
+        self.content_frame.rowconfigure(0, weight=1)  # Row 0: Frying panels
+        self.content_frame.rowconfigure(1, weight=1)  # Row 1: Observe panels
+        self.content_frame.columnconfigure(0, weight=1)  # Column 0: Left cameras
+        self.content_frame.columnconfigure(1, weight=1)  # Column 1: Right cameras
 
         # Create 4 camera panels
         self.create_frying_left_panel()
@@ -847,7 +846,7 @@ class JetsonIntegratedApp:
         self.create_control_panel()
 
     def create_frying_left_panel(self):
-        """Create Frying AI Left camera panel (세로 레이아웃)"""
+        """Create Frying AI Left camera panel (2x2 그리드 레이아웃)"""
         panel = tk.Frame(self.content_frame, bg=COLOR_PANEL, relief=tk.RAISED, borderwidth=1,
                         highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
         panel.grid(row=0, column=0, padx=2, pady=1, sticky="nsew")
@@ -898,10 +897,10 @@ class JetsonIntegratedApp:
         self.frying_left_status.pack(pady=1)
 
     def create_frying_right_panel(self):
-        """Create Frying AI Right camera panel (세로 레이아웃)"""
+        """Create Frying AI Right camera panel (2x2 그리드 레이아웃)"""
         panel = tk.Frame(self.content_frame, bg=COLOR_PANEL, relief=tk.RAISED, borderwidth=1,
                         highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
-        panel.grid(row=1, column=0, padx=2, pady=1, sticky="nsew")
+        panel.grid(row=0, column=1, padx=2, pady=1, sticky="nsew")
 
         # Title (축소)
         title = tk.Label(panel, text="🍤 튀김 AI - 오른쪽", font=("Noto Sans CJK KR", 12, "bold"), bg=COLOR_PANEL, fg=COLOR_TEXT)
@@ -949,10 +948,10 @@ class JetsonIntegratedApp:
         self.frying_right_status.pack(pady=1)
 
     def create_observe_left_panel(self):
-        """Create Observe_add Left camera panel (세로 레이아웃)"""
+        """Create Observe_add Left camera panel (2x2 그리드 레이아웃)"""
         panel = tk.Frame(self.content_frame, bg=COLOR_PANEL, relief=tk.RAISED, borderwidth=1,
                         highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
-        panel.grid(row=2, column=0, padx=2, pady=1, sticky="nsew")
+        panel.grid(row=1, column=0, padx=2, pady=1, sticky="nsew")
 
         # Title (축소)
         title = tk.Label(panel, text="🥘 바켓 감지 - 왼쪽", font=("Noto Sans CJK KR", 12, "bold"), bg=COLOR_PANEL, fg=COLOR_TEXT)
@@ -978,10 +977,10 @@ class JetsonIntegratedApp:
         self.observe_left_status.pack(pady=2)
 
     def create_observe_right_panel(self):
-        """Create Observe_add Right camera panel (세로 레이아웃)"""
+        """Create Observe_add Right camera panel (2x2 그리드 레이아웃)"""
         panel = tk.Frame(self.content_frame, bg=COLOR_PANEL, relief=tk.RAISED, borderwidth=1,
                         highlightbackground=COLOR_PANEL_BORDER, highlightthickness=1)
-        panel.grid(row=3, column=0, padx=2, pady=1, sticky="nsew")
+        panel.grid(row=1, column=1, padx=2, pady=1, sticky="nsew")
 
         # Title (축소)
         title = tk.Label(panel, text="🥘 바켓 감지 - 오른쪽", font=("Noto Sans CJK KR", 12, "bold"), bg=COLOR_PANEL, fg=COLOR_TEXT)
