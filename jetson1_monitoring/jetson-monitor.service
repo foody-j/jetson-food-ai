@@ -11,6 +11,7 @@ WorkingDirectory=/home/dkuyj/jetson-camera-monitor/autostart_autodown
 Environment="DISPLAY=:0"
 Environment="XAUTHORITY=/home/dkuyj/.Xauthority"
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONUNBUFFERED=1"
 ExecStart=/usr/bin/python3 /home/dkuyj/jetson-camera-monitor/autostart_autodown/JETSON1_INTEGRATED.py
 Restart=on-failure
 RestartSec=10
