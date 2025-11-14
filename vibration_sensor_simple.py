@@ -55,7 +55,7 @@ BYTESIZE = 8
 TIMEOUT_S = 0.15
 
 # 폴링/버퍼
-POLL_HZ_TOTAL = 45      # 총 루프 속도(초당 45회 → 유닛당 약 15Hz)
+POLL_HZ_TOTAL = config.get("poll_hz_total", 45)  # 총 루프 속도(초당 45회 → 유닛당 약 15Hz)
 RETRY_READ = 2
 RECONNECT_TIMEOUT = 3.0
 WINDOW_SEC = config.get("window_sec", 5.0)  # X축 시간 범위 (초)

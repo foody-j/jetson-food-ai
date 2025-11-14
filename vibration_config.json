@@ -10,6 +10,7 @@
   "port": "/dev/ttyUSB0",
   "baud": 115200,
   "unit_ids": ["0x50", "0x51", "0x52"],
+  "poll_hz_total": 45,
   "window_sec": 5.0,
   "y_axis_limits": {
     "acc": {"min": -20, "max": 20},
