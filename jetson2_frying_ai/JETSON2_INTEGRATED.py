@@ -812,12 +812,13 @@ class JetsonIntegratedApp:
                  relief=tk.FLAT, bd=0, activebackground="#00796B",
                  padx=8, pady=5).pack(side=tk.LEFT, padx=2)
 
-        # Vibration check button
-        tk.Button(right_frame, text="진동 체크",
+        # Vibration check toggle button
+        self.vibration_check_btn = tk.Button(right_frame, text="진동 시작",
                  font=("Noto Sans CJK KR", 12, "bold"),
-                 command=self.open_vibration_check, bg=COLOR_INFO, fg="white",
+                 command=self.toggle_vibration_check, bg=COLOR_INFO, fg="white",
                  relief=tk.FLAT, bd=0, activebackground=COLOR_BUTTON_HOVER,
-                 padx=8, pady=5).pack(side=tk.LEFT, padx=2)
+                 padx=8, pady=5)
+        self.vibration_check_btn.pack(side=tk.LEFT, padx=2)
 
         # Settings button (placeholder)
         tk.Button(right_frame, text="설정",
@@ -1940,14 +1941,19 @@ class JetsonIntegratedApp:
 
         try:
             # 진동 센서 프로그램을 별도 프로세스로 실행
+            # stdout/stderr=None → 부모 프로세스(이 프로그램)의 출력으로 리다이렉트 (journalctl에서 보임)
             self.vibration_process = subprocess.Popen(
                 ["python3", vibration_script],
                 cwd=base_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stdout=None,  # 부모 프로세스의 stdout으로 출력 (journalctl에서 보임)
+                stderr=None   # 부모 프로세스의 stderr로 출력 (journalctl에서 보임)
             )
             self.child_processes.append(self.vibration_process)
             print(f"[진동] 프로세스 시작 (PID: {self.vibration_process.pid})")
+            print(f"[진동] 디버깅 메시지는 journalctl -u jetson2-ai -f 로 확인하세요")
+
+            # Update button state
+            self.vibration_check_btn.config(text="진동 중지", bg=COLOR_ERROR)
         except Exception as e:
             print(f"[진동] 실행 오류: {e}")
             self.vibration_process = None
@@ -1974,14 +1980,26 @@ class JetsonIntegratedApp:
             if self.vibration_process in self.child_processes:
                 self.child_processes.remove(self.vibration_process)
 
+            # Update button state
+            self.vibration_check_btn.config(text="진동 시작", bg=COLOR_INFO)
+
         except Exception as e:
             print(f"[진동] 종료 오류: {e}")
         finally:
             self.vibration_process = None
 
+    def toggle_vibration_check(self):
+        """Toggle vibration sensor monitoring (GUI button)"""
+        if self.vibration_process is None:
+            print("[진동] GUI 버튼으로 수동 시작")
+            self.start_vibration_check()
+        else:
+            print("[진동] GUI 버튼으로 수동 종료")
+            self.stop_vibration_check()
+
     def open_vibration_check(self):
-        """Open vibration sensor monitoring program (GUI button)"""
-        print("[진동] GUI 버튼으로 수동 실행")
+        """Open vibration sensor monitoring program (deprecated - use toggle)"""
+        print("[진동] GUI 버튼으로 수동 실행 (MQTT 호환)")
         self.start_vibration_check()
 
     def open_settings(self):
