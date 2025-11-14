@@ -88,19 +88,19 @@ def show_popup_topmost(func, title, message, **kwargs):
 
 def showinfo_topmost(title, message):
     """Show info dialog always on top"""
-    return show_popup_topmost(showinfo_topmost, title, message)
+    return show_popup_topmost(messagebox.showinfo, title, message)
 
 def showwarning_topmost(title, message):
     """Show warning dialog always on top"""
-    return show_popup_topmost(showwarning_topmost, title, message)
+    return show_popup_topmost(messagebox.showwarning, title, message)
 
 def showerror_topmost(title, message):
     """Show error dialog always on top"""
-    return show_popup_topmost(showerror_topmost, title, message)
+    return show_popup_topmost(messagebox.showerror, title, message)
 
 def askokcancel_topmost(title, message):
     """Show ok/cancel dialog always on top"""
-    return show_popup_topmost(askokcancel_topmost, title, message)
+    return show_popup_topmost(messagebox.askokcancel, title, message)
 
 config = load_config()
 
@@ -885,11 +885,11 @@ class JetsonIntegratedApp:
         )
         self.frying_left_probe_label.pack()
 
-        # Color features
-        self.frying_left_color_label = tk.Label(
-            info_frame, text="갈색: --% | 황금: --%", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_WARNING
-        )
-        self.frying_left_color_label.pack()
+        # Color features - DISABLED per user request
+        # self.frying_left_color_label = tk.Label(
+        #     info_frame, text="갈색: --% | 황금: --%", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_WARNING
+        # )
+        # self.frying_left_color_label.pack()
 
         # Status
         self.frying_left_status = tk.Label(
@@ -936,11 +936,11 @@ class JetsonIntegratedApp:
         )
         self.frying_right_probe_label.pack()
 
-        # Color features
-        self.frying_right_color_label = tk.Label(
-            info_frame, text="갈색: --% | 황금: --%", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_WARNING
-        )
-        self.frying_right_color_label.pack()
+        # Color features - DISABLED per user request
+        # self.frying_right_color_label = tk.Label(
+        #     info_frame, text="갈색: --% | 황금: --%", font=("Noto Sans CJK KR", 10), bg=COLOR_PANEL, fg=COLOR_WARNING
+        # )
+        # self.frying_right_color_label.pack()
 
         # Status
         self.frying_right_status = tk.Label(
