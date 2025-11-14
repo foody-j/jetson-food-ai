@@ -2271,6 +2271,15 @@ class IntegratedMonitorApp:
             # 백그라운드 스레드에서 정리 작업 수행 (UI 프리징 방지)
             def cleanup_and_exit():
                 try:
+                    # Stop ongoing recordings/data collection to save metadata
+                    print("[종료] 녹화/수집 중지 및 메타데이터 저장 중...")
+                    if self.stirfry_recording:
+                        self.stop_stirfry_recording()
+                    if hasattr(self, 'stirfry_pot1_recording') and self.stirfry_pot1_recording:
+                        self.stop_pot1_recording()
+                    if hasattr(self, 'stirfry_pot2_recording') and self.stirfry_pot2_recording:
+                        self.stop_pot2_recording()
+
                     # Cleanup child processes (진동센서 등)
                     for proc in self.child_processes:
                         try:

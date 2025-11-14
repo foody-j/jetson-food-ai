@@ -2461,6 +2461,15 @@ class JetsonIntegratedApp:
             # 백그라운드 스레드에서 정리 작업 수행 (UI 프리징 방지)
             def cleanup_and_exit():
                 try:
+                    # Stop ongoing data collection to save session_info.json
+                    print("[종료] 데이터 수집 중지 및 메타데이터 저장 중...")
+                    if self.pot1_collecting:
+                        self.stop_pot1_collection()
+                    if self.pot2_collecting:
+                        self.stop_pot2_collection()
+                    if self.data_collection_active:
+                        self.stop_data_collection()
+
                     # Cleanup child processes (진동센서 등)
                     for proc in self.child_processes:
                         try:
