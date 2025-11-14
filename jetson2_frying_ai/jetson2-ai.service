@@ -9,6 +9,7 @@ User=yjk
 WorkingDirectory=/home/yjk/jetson-food-ai/jetson2_frying_ai
 Environment="DISPLAY=:0"
 Environment="XAUTHORITY=/home/yjk/.Xauthority"
+Environment="PYTHONUNBUFFERED=1"
 ExecStart=/usr/bin/python3 /home/yjk/jetson-food-ai/jetson2_frying_ai/JETSON2_INTEGRATED.py
 Restart=always
 RestartSec=10
