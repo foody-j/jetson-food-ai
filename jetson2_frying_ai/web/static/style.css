@@ -1,219 +1,421 @@
+/* Jetson2 대시보드 — Lavender Research 디자인 시스템 기반 (흰 바탕 + 라벤더 구조 요소)
+   카메라 영상 영역만 어두운 배경을 유지해 주방 모니터에서 눈부심을 줄인다. */
+
+@font-face {
+    font-family: "Pretendard";
+    src: url("/static/fonts/PretendardVariable.woff2") format("woff2-variations"),
+         url("/static/fonts/PretendardVariable.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+:root {
+    --canvas: #FFFFFF;
+    --neutral-surface: #F7F7F8;
+    --lavender-surface: #F3EFF8;
+    --lavender-soft: #E8E2F3;
+    --lavender-strong: #C2B1DF;
+    --purple: #9558B2;
+    --navy: #31485E;
+    --ink: #171717;
+    --gray-text: #4A515A;
+    --divider: #D5D7DB;
+    --green: #43B66F;
+    --orange: #EF9231;
+    --coral: #EB5548;
+    --coral-dark: #B83B33;
+    --video-bg: #171717;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+* {
+    box-sizing: border-box;
+}
+
 body {
     margin: 0;
     padding: 0;
-    background: #1a1a1a;
-    color: #ffffff;
-    font-family: "Segoe UI", Arial, sans-serif;
-}
-
-.header {
-    background: #2c3e50;
-    padding: 20px;
-    text-align: center;
-}
-
-.header h1 {
-    margin: 0 0 10px 0;
-    font-size: 22px;
-}
-
-#status-bar {
-    color: #bdc3c7;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: "Pretendard", "Noto Sans KR", "Noto Sans CJK KR", sans-serif;
     font-size: 14px;
+    line-height: 1.25;
 }
 
-.control-panel {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    padding: 12px 15px;
-    background: #1f2a36;
-    border-bottom: 1px solid #2c3e50;
-}
-
-.control-group {
+/* ---- 헤더 (Compact Header) ---- */
+.topbar {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 14px 20px 12px;
+    border-bottom: 1px solid var(--divider);
+}
+
+.title-block {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.title-mark {
+    width: 5px;
+    height: 26px;
+    background: var(--lavender-strong);
+    border-radius: 2px;
+}
+
+.topbar h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 600;
+}
+
+.chips {
+    display: flex;
     gap: 8px;
     flex-wrap: wrap;
 }
 
-.control-title {
+.chip {
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--neutral-surface);
+    border: 1px solid var(--divider);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.chip-plain {
+    background: transparent;
+    border-color: transparent;
+    color: var(--gray-text);
+    font-weight: 400;
+}
+
+.chip-ok {
+    background: var(--green);
+    border-color: var(--green);
+}
+
+.chip-warn {
+    background: var(--orange);
+    border-color: var(--orange);
+}
+
+.chip-error {
+    background: var(--coral);
+    border-color: var(--coral);
+}
+
+.status-line:empty {
+    display: none;
+}
+
+.status-line {
+    padding: 8px 20px;
+    color: var(--gray-text);
+    font-size: 13px;
+    background: var(--neutral-surface);
+    border-bottom: 1px solid var(--divider);
+}
+
+/* ---- 카메라 멈춤 경고 ---- */
+.alert {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 20px;
+    background: var(--coral);
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.alert[hidden] {
+    display: none;
+}
+
+.alert-text {
+    flex: 1;
+    min-width: 240px;
+}
+
+/* ---- 카메라 그리드 (주요 근거 → 가장 크게) ---- */
+.grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 16px 20px;
+}
+
+.camera-box {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--divider);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--canvas);
+}
+
+.cam-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    font-size: 16px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--divider);
+}
+
+.camera-box img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 5 / 4;
+    /* 헤더·상태줄을 빼고 카메라 2행이 한 화면에 들어오도록 높이 제한 */
+    max-height: calc((100vh - 400px) / 2);
+    min-height: 180px;
+    object-fit: contain;
+    background: var(--video-bg);
+}
+
+.cam-status {
+    padding: 8px 12px;
+    background: var(--neutral-surface);
+    color: var(--gray-text);
+    font-family: var(--mono);
     font-size: 12px;
-    color: #bdc3c7;
-    margin-right: 4px;
-    text-transform: uppercase;
+    word-break: break-word;
+}
+
+.pill {
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    background: var(--neutral-surface);
+    color: var(--ink);
+}
+
+.pill-ok {
+    background: var(--green);
+}
+
+.pill-warn {
+    background: var(--orange);
+}
+
+.pill-error {
+    background: var(--coral);
+}
+
+.pill-idle {
+    background: var(--neutral-surface);
+    color: var(--gray-text);
+}
+
+/* ---- 패널 공통 (Compact Technical: 정렬 + 구분선) ---- */
+.panel {
+    padding: 14px 20px;
+    border-top: 1px solid var(--divider);
+}
+
+.section-label {
+    margin-bottom: 10px;
+    color: var(--purple);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.control-panel {
+    display: flex;
+    flex-direction: column;
+}
+
+.control-group {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--neutral-surface);
+}
+
+.control-group-key {
+    padding-top: 10px;
+    padding-bottom: 10px;
+    margin-bottom: 4px;
+    background: var(--lavender-surface);
+    border-radius: 8px;
+    border-bottom: none;
+}
+
+.control-title {
+    color: var(--gray-text);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.control-buttons {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .btn {
-    background: #34495e;
-    color: #ffffff;
-    border: 1px solid #2c3e50;
+    padding: 6px 12px;
+    background: var(--canvas);
+    color: var(--ink);
+    border: 1px solid var(--divider);
     border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 12px;
+    font-family: inherit;
+    font-size: 13px;
     cursor: pointer;
 }
 
 .btn:hover {
-    background: #3d566e;
+    background: var(--lavender-soft);
+    border-color: var(--lavender-strong);
 }
 
 .btn-danger {
-    background: #7a2e2a;
-    border-color: #5c211e;
+    background: var(--coral-dark);
+    border-color: var(--coral-dark);
+    color: #FFFFFF;
+    font-weight: 600;
 }
 
 .btn-danger:hover {
-    background: #933833;
+    background: #9E322B;
+    border-color: #9E322B;
+}
+
+.mqtt-raw {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+    margin-top: 4px;
+}
+
+.mqtt-raw input {
+    width: 220px;
+    max-width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.muted {
+    color: var(--gray-text);
+    font-size: 12px;
 }
 
 .recovery-status {
-    font-size: 12px;
-    color: #bdc3c7;
+    margin-left: 4px;
+    color: var(--gray-text);
+    font-size: 13px;
 }
 
 .recovery-running {
-    color: #ffd166;
+    color: #A95A00;
+    font-weight: 600;
 }
 
 .recovery-ok {
-    color: #27ae60;
+    color: #197A45;
+    font-weight: 600;
 }
 
 .recovery-error {
-    color: #ff7b72;
+    color: var(--coral-dark);
+    font-weight: 600;
+}
+
+/* ---- 로그 ---- */
+.log-list {
+    max-height: 200px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--neutral-surface);
+    border: 1px solid var(--divider);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 12px;
 }
 
 .recovery-log-text {
-    margin: 0;
-    max-height: 260px;
+    max-height: 280px;
     white-space: pre-wrap;
     word-break: break-word;
 }
 
-.mqtt-log {
-    padding: 10px 15px;
-    background: #111820;
-    border-bottom: 1px solid #2c3e50;
-    font-family: monospace;
-    font-size: 12px;
-}
-
-.mqtt-log-title {
-    color: #bdc3c7;
-    margin-bottom: 6px;
-}
-
-.mqtt-log-list {
-    max-height: 180px;
-    overflow-y: auto;
-    background: #0b0f14;
-    border: 1px solid #2c3e50;
-    padding: 6px;
-}
-
-.mqtt-log-item {
+.log-item {
     padding: 2px 0;
-    border-bottom: 1px dashed #233041;
+    border-bottom: 1px solid var(--divider);
+}
+
+.log-item:last-child {
+    border-bottom: none;
 }
 
 .log-level-info b {
-    color: #8fd3ff;
+    color: var(--navy);
 }
 
 .log-level-warning b {
-    color: #ffd166;
+    color: #A95A00;
 }
 
 .log-level-error b {
-    color: #ff7b72;
+    color: var(--coral-dark);
 }
 
-.snapshot-panel {
-    padding: 10px 15px;
-    background: #111820;
-    border-bottom: 1px solid #2c3e50;
-}
-
-.snapshot-title {
-    color: #bdc3c7;
-    margin-bottom: 6px;
-    font-size: 12px;
-}
-
+/* ---- 스냅샷 / 진동 ---- */
 .snapshot-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    gap: 12px;
 }
 
 .snapshot-box {
-    background: #0b0f14;
-    border: 1px solid #2c3e50;
+    border: 1px solid var(--divider);
+    border-radius: 4px;
     padding: 6px;
 }
 
 .snapshot-box img {
+    display: block;
     width: 100%;
     height: auto;
-    display: block;
-    background: #000;
+    background: var(--video-bg);
 }
 
 .snapshot-metrics {
-    color: #9bd59b;
-    font-family: monospace;
-    font-size: 11px;
     margin-top: 4px;
+    color: var(--gray-text);
+    font-family: var(--mono);
+    font-size: 12px;
     white-space: pre-wrap;
     word-break: break-word;
 }
 
-.grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 15px;
-    padding: 15px;
-    height: calc(100vh - 360px);
-    box-sizing: border-box;
-}
-
-.camera-box {
-    border: 2px solid #34495e;
-    border-radius: 10px;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    background: #2c3e50;
-}
-
-.cam-header {
-    background: #34495e;
-    padding: 12px;
-    font-weight: bold;
-    font-size: 16px;
-}
-
-.camera-box img {
-    width: 100%;
-    height: auto;
-    flex: 1;
-    object-fit: contain;
-    background: #000000;
-}
-
-.cam-status {
-    background: #1a1a1a;
-    padding: 10px;
-    font-size: 12px;
-    color: #27ae60;
-    font-family: monospace;
-}
-
-@media (max-width: 900px) {
-    .grid {
+@media (max-width: 600px) {
+    .grid,
+    .snapshot-grid {
         grid-template-columns: 1fr;
-        height: auto;
+    }
+
+    .control-group {
+        grid-template-columns: 1fr;
+        gap: 6px;
     }
 }

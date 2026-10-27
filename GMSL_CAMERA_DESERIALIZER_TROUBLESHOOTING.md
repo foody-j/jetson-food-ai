@@ -298,6 +298,16 @@ sudo env PYTHONPATH=$HOME/.local/lib/python3.10/site-packages ./reset_deser_and_
 * 서비스 재시작 후 `Camera 0~3 started successfully`, Observe AI `cam2/cam3 status_change (INIT → NO_BASKET)` → 프레임 수신 확인.
 * 릴레이가 실제로 동작하지 않아도 위험 없음: 릴레이 명령은 시리얼 쓰기만 성공하고 넘어가며, 결과적으로 **12V 차단 없이 RESET_ALL + 드라이버 재로드**만 수행됨. NC 배선이라 릴레이가 멈추거나 USB를 뽑아도 12V는 인가 상태.
 
+#### 웹 대시보드에서 실행 (Jetson #2, 2026-10-27 추가)
+* 대시보드 상단에 카메라 멈춤 경고(5초 이상 새 프레임 없음)가 뜨고, `칩 리셋` / `칩 리셋 (릴레이 무시)` / `릴레이 상태` 버튼으로 같은 작업을 실행할 수 있음.
+* 최초 1회 설치 (웹 서비스 사용자 계정으로, sudo 없이 실행 → 내부에서 sudo 비밀번호 요청):
+  ```bash
+  cd ~/jetson-food-ai && git pull && ./install_deser_control.sh
+  sudo systemctl restart jetson2-web
+  ```
+* 구조: 버튼 → `sudo -n systemctl start --no-block deser-control@<동작>.service` (sudoers 에 이 3개만 허용) → root 로 `deser_control.sh` 실행. 리셋이 `jetson2-web` 을 중지해도 별도 서비스라 끝까지 진행되고 웹은 자동 재시작됨.
+* 진행 로그: 대시보드 `Log` 버튼, 또는 `/run/deser-control/<동작>.log`. 리셋 후 300초 쿨다운(`camera_recovery_cooldown_sec`).
+
 #### 미확정 사항
 * 이번에 릴레이가 실제로 12V를 끊었는지 모름(칩은 12V 차단 중에도 응답하므로 출력으로 구분 불가). 따라서 "**칩 리셋만으로 stall 복구 가능**"은 유력하지만 확정 아님.
 * 확정 방법: (1) 현장에서 실행 중 릴레이 딸깍 소리/보드 LED 소등 확인, (2) 12V 차단 중 I2C bus 9에서 시리얼라이저(`0x44`)·카메라(`0x1a~0x1d`) 소멸 여부 확인, (3) 다음 stall 때 릴레이 없이 RESET_ALL만 수행해 비교.
