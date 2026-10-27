@@ -55,6 +55,7 @@ ON_DELAY_SEC="${ON_DELAY_SEC:-8}"    # 전원 인가 후 디시리얼라이저 �
 GMSL_MODE="${GMSL_MODE:-2,2,2,2}"    # GMSL2/3G (2,2,2,2)
 SENSOR_MODE="${SENSOR_MODE:-1}"      # 1 = 1920x1536
 DO_REBOOT=false
+SKIP_RELAY_CHECK="${SKIP_RELAY_CHECK:-false}"  # true: 릴레이 상태 무응답이어도 계속 진행
 
 usage() {
     cat <<EOF
@@ -62,6 +63,7 @@ usage() {
 
 옵션:
   --reboot             디시리얼라이저 리셋(ON 유지) 후 젯슨을 즉시 재부팅(sudo reboot)
+  --skip-relay-check   릴레이 상태 조회 무응답이어도 계속 진행 (릴레이 무동작 시 I2C 리셋 + 드라이버 재로드만 수행됨)
   --wiring <nc|no>     릴레이 배선 방식 (기본값: $WIRING)
   --port <path>        USB 릴레이 시리얼 포트 경로 (기본값: $RELAY_PORT)
   --i2c-bus <num>      MAX96712 I2C 버스 번호 (기본값: $I2C_BUS)
@@ -75,6 +77,10 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --reboot)
             DO_REBOOT=true
+            shift
+            ;;
+        --skip-relay-check)
+            SKIP_RELAY_CHECK=true
             shift
             ;;
         --wiring)
@@ -197,11 +203,21 @@ fi
 STATUS_OUT="$(python3 "$RELAY_SCRIPT" --port "$RELAY_PORT" --wiring "$WIRING" --mode status --init-delay 1.5 --retries 3 2>&1)"
 STATUS_RC=$?
 echo "$STATUS_OUT" | sed 's/^/  /'
-if [ "$STATUS_RC" -ne 0 ] || echo "$STATUS_OUT" | grep -q "(no response)"; then
-    echo "[ERROR] USB 릴레이가 상태 조회에 응답하지 않습니다. 안전을 위해 작업을 중단합니다."
+if [ "$STATUS_RC" -ne 0 ]; then
+    echo "[ERROR] USB 릴레이 제어 스크립트 실행 실패 (pySerial, 포트 권한 등을 확인하세요). 작업을 중단합니다."
     exit 1
+elif echo "$STATUS_OUT" | grep -q "(no response)"; then
+    if [ "$SKIP_RELAY_CHECK" = true ]; then
+        echo "  [WARN] USB 릴레이 상태 조회 무응답 — --skip-relay-check 지정으로 계속 진행합니다"
+        echo "         (릴레이가 실제로 동작하지 않으면 12V 차단 없이 I2C RESET_ALL + 드라이버 재로드만 수행됨)"
+    else
+        echo "[ERROR] USB 릴레이가 상태 조회에 응답하지 않습니다. 안전을 위해 작업을 중단합니다."
+        echo "        (응답 없이 진행하려면 --skip-relay-check 옵션 사용)"
+        exit 1
+    fi
+else
+    echo "  ✓ USB 릴레이 응답 정상"
 fi
-echo "  ✓ USB 릴레이 응답 정상"
 
 # ------------------------------------------------------------------------------
 # [단계 1] 카메라 사용 서비스 중지, 점유 프로세스 확인 및 커널 모듈 언로드
