@@ -100,7 +100,7 @@
       설정 레지스터(0x08A0 0x040B 0x090B): 리셋 전 [0x84 0x42 0x07] → 리셋 후 [0x04 0x02 0x00]
   ```
   값이 그대로면 `[WARN] 칩 리셋이 적용되지 않았을 수 있습니다`가 출력됩니다.
-* 스크립트 안전장치: 릴레이 무응답이면 아무것도 건드리지 않고 종료 / `/dev/video*` 사용 중 프로세스가 있으면 중단 / `rmmod` 실패·중간 실패 시 드라이버 재로드 + collector 재시작 후 종료.
+* 스크립트 안전장치: 릴레이 무응답이면 아무것도 건드리지 않고 종료(`--skip-relay-check`로 무시 가능 — 장애 유형 9 참고) / `/dev/video*` 사용 중 프로세스가 있으면 중단 / `rmmod` 실패·중간 실패 시 드라이버 재로드 + collector 재시작 후 종료.
 * ⚠️ 마지막의 `성공 채널: 4/4`는 **v4l2 제어값 설정 성공 개수**일 뿐 영상 수신 여부가 아닙니다. 반드시 4장 3) 스트림 검증으로 확인하세요.
 
 ---
@@ -267,6 +267,47 @@
 2. 출력에 `리셋 후 [0x04 0x02 0x00]`이 나오는지 확인 ➔ 칩 리셋 확인.
 3. 4장 3) 스트림 검증 + 실제 영상 확인 ➔ 초록색이 사라지면 칩 상태 문제로 확정.
 4. 그래도 초록색이면 칩 문제가 아니므로 동축 케이블·커넥터·카메라 교체 순으로 점검.
+
+---
+
+### 장애 유형 9: 카메라 3대 `Frame stalled` 2시간 지속 — 릴레이 무응답 상태에서 I2C 칩 리셋만으로 복구 **[실측 2026-10-27, 울산 Jetson #2]**
+
+#### 증상
+* `jetson2-web` 로그에 CAM1~3 `Frame stalled`가 5초 간격으로 반복, 경과 시간이 계속 증가 (14:55 기준 약 7760초 → 12:46경부터 정지).
+  ```text
+  [CAM1] Frame stalled (7764.3s since last unique frame, same_count=5710)
+  [CAM2] Frame stalled (7749.7s since last unique frame, same_count=5627)
+  [CAM3] Frame stalled (7749.8s since last unique frame, same_count=5701)
+  ```
+* camera stall watchdog이 기본 비활성(장애 유형 5)이라 자동 복구 없이 로그만 쌓임.
+
+#### 복구 중 만난 문제
+1. **sudo에서 pySerial 미검출**: `[ERROR] pySerial import failed: No module named 'serial'`
+   * 원인: pyserial이 사용자 경로(`~/.local/lib/python3.10/site-packages`)에만 설치되어 root에서 안 보임.
+   * 해결(설치 없이): `sudo env PYTHONPATH=$HOME/.local/lib/python3.10/site-packages ...` — 스크립트 내부 `python3` 호출에도 상속됨. 영구 해결은 `sudo apt-get install -y python3-serial`.
+2. **USB 릴레이 상태 조회 무응답**: 포트(`ttyUSB0`, CH340, USB 경로 `1-2.2`)는 열리지만 `Status response: (no response)`. `--init-delay 3`으로도 동일.
+   * 다른 젯슨에서 같은 모델이 `CH1: OFF`로 응답하므로 모델 문제는 아님. 보드 MCU 멈춤/접촉 불량 의심, 현장 확인 필요.
+   * 진동센서는 FTDI(`ttyUSB1`)이며 `jetson2-web`이 사용 중 — 포트 충돌 없음.
+
+#### 해결
+```bash
+cd ~/jetson-food-ai
+sudo env PYTHONPATH=$HOME/.local/lib/python3.10/site-packages ./reset_deser_and_init_cameras.sh --skip-relay-check
+```
+* 출력: `리셋 전 [0x84 0x42 0x07] → 리셋 후 [0x04 0x02 0x00]`, 칩 ID `0xa0`, `/dev/video0~3` 설정 4/4.
+* 서비스 재시작 후 `Camera 0~3 started successfully`, Observe AI `cam2/cam3 status_change (INIT → NO_BASKET)` → 프레임 수신 확인.
+* 릴레이가 실제로 동작하지 않아도 위험 없음: 릴레이 명령은 시리얼 쓰기만 성공하고 넘어가며, 결과적으로 **12V 차단 없이 RESET_ALL + 드라이버 재로드**만 수행됨. NC 배선이라 릴레이가 멈추거나 USB를 뽑아도 12V는 인가 상태.
+
+#### 미확정 사항
+* 이번에 릴레이가 실제로 12V를 끊었는지 모름(칩은 12V 차단 중에도 응답하므로 출력으로 구분 불가). 따라서 "**칩 리셋만으로 stall 복구 가능**"은 유력하지만 확정 아님.
+* 확정 방법: (1) 현장에서 실행 중 릴레이 딸깍 소리/보드 LED 소등 확인, (2) 12V 차단 중 I2C bus 9에서 시리얼라이저(`0x44`)·카메라(`0x1a~0x1d`) 소멸 여부 확인, (3) 다음 stall 때 릴레이 없이 RESET_ALL만 수행해 비교.
+* 카메라 센서/시리얼라이저 자체가 멈춘 경우(VI `fatal: error recovery failed` 등)는 12V(PoC) 차단이 필요할 수 있음.
+
+### 참고: I2C 칩 리셋(RESET_ALL) 원리
+* 명령: `i2ctransfer -f -y 9 w3@0x6b 0x00 0x13 0x40` — 버스 9, 칩 주소 `0x6b`, 16비트 레지스터 `0x0013`에 `0x40`(bit6 = RESET_ALL) 쓰기. `-f`는 드라이버가 주소를 점유 중이어도 강제 접근.
+* 칩이 모든 레지스터를 기본값으로 되돌리고 링크 상태 머신을 재시작하며, 비트는 자동 해제(self-clearing).
+* 정상 설정까지 지워지므로 반드시 **드라이버 언로드 → RESET_ALL → 드라이버 재로드(링크·MIPI 재설정)** 순서로 수행.
+* 12V 차단은 카메라(PoC)만 리셋하고 칩은 CSI 쪽 전원으로 살아 있음(2장 ⚠️). 칩 상태 꼬임에는 RESET_ALL이 핵심.
 
 ---
 
