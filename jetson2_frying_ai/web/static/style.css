@@ -59,6 +59,39 @@ body {
     background: #3d566e;
 }
 
+.btn-danger {
+    background: #7a2e2a;
+    border-color: #5c211e;
+}
+
+.btn-danger:hover {
+    background: #933833;
+}
+
+.recovery-status {
+    font-size: 12px;
+    color: #bdc3c7;
+}
+
+.recovery-running {
+    color: #ffd166;
+}
+
+.recovery-ok {
+    color: #27ae60;
+}
+
+.recovery-error {
+    color: #ff7b72;
+}
+
+.recovery-log-text {
+    margin: 0;
+    max-height: 260px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .mqtt-log {
     padding: 10px 15px;
     background: #111820;

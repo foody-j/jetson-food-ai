@@ -73,6 +73,19 @@
             <button class="btn" onclick="aiSnapshot(1)">SET 1 (0+2)</button>
             <button class="btn" onclick="aiSnapshot(2)">SET 2 (1+3)</button>
         </div>
+        <div class="control-group">
+            <div class="control-title">Camera Recovery</div>
+            <button class="btn" onclick="recoveryStart('relay-status')">릴레이 상태</button>
+            <button class="btn btn-danger" onclick="recoveryStart('reset')">칩 리셋</button>
+            <button class="btn btn-danger" onclick="recoveryStart('reset-skip-relay')">칩 리셋 (릴레이 무시)</button>
+            <button class="btn" onclick="toggleRecoveryLog()">Log</button>
+            <span id="recovery-status" class="recovery-status">-</span>
+        </div>
+    </div>
+
+    <div class="mqtt-log" id="recovery-log" style="display:none;">
+        <div class="mqtt-log-title">카메라 복구 로그</div>
+        <pre class="mqtt-log-list recovery-log-text" id="recovery-log-text">-</pre>
     </div>
 
     <div class="mqtt-log" id="mqtt-log" style="display:none;">
@@ -427,8 +440,112 @@
             }
         }
 
+        // ---- 카메라 복구 (칩 리셋 / 릴레이 상태) ----
+        const RECOVERY_LABELS = {
+            'reset': '칩 리셋',
+            'reset-skip-relay': '칩 리셋 (릴레이 무시)',
+            'relay-status': '릴레이 상태 조회',
+        };
+        const RECOVERY_CONFIRM = {
+            'reset': '카메라 칩 리셋을 실행할까요?\n\n약 1분 동안 튀김/바켓 AI와 대시보드가 중지됩니다.',
+            'reset-skip-relay': '릴레이 응답 없이 칩 리셋을 진행할까요?\n\n약 1분 동안 튀김/바켓 AI와 대시보드가 중지됩니다.\n(릴레이가 동작하지 않으면 12V 차단 없이 I2C 리셋만 수행)',
+        };
+        let recoveryWatching = false;
+        let recoveryWebDown = false;
+
+        function setRecoveryStatus(text, level) {
+            const el = document.getElementById('recovery-status');
+            el.textContent = text;
+            el.className = `recovery-status ${level ? 'recovery-' + level : ''}`;
+        }
+
+        function reconnectCameras() {
+            document.querySelectorAll('.camera-box img').forEach(img => {
+                const base = img.getAttribute('src').split('?')[0];
+                img.src = `${base}?t=${Date.now()}`;
+            });
+        }
+
+        async function recoveryStart(action) {
+            if (RECOVERY_CONFIRM[action] && !confirm(RECOVERY_CONFIRM[action])) {
+                return;
+            }
+            try {
+                const res = await fetch(`/api/camera-recovery/${action}`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.ok) {
+                    setRecoveryStatus(`실패: ${data.message || data.error}`, 'error');
+                    return;
+                }
+                setRecoveryStatus(`${RECOVERY_LABELS[action]} 시작...`, 'running');
+                document.getElementById('recovery-log').style.display = 'block';
+                recoveryWatching = true;
+                setTimeout(refreshRecovery, 1000);
+            } catch (e) {
+                setRecoveryStatus('요청 실패', 'error');
+            }
+        }
+
+        async function refreshRecovery() {
+            let data;
+            try {
+                const res = await fetch('/api/camera-recovery/status');
+                data = await res.json();
+            } catch (e) {
+                // 리셋 중에는 웹 서비스도 재시작되므로 응답이 끊기는 것이 정상
+                if (recoveryWatching) {
+                    recoveryWebDown = true;
+                    setRecoveryStatus('리셋 진행 중 (대시보드 재시작 대기)...', 'running');
+                    setTimeout(refreshRecovery, 2000);
+                }
+                return;
+            }
+
+            const logText = document.getElementById('recovery-log-text');
+            logText.textContent = data.log || '-';
+            logText.scrollTop = logText.scrollHeight;
+
+            if (!data.installed) {
+                setRecoveryStatus('미설치 (install_deser_control.sh)', 'error');
+                return;
+            }
+            if (data.running) {
+                recoveryWatching = true;
+                setRecoveryStatus(`${RECOVERY_LABELS[data.running] || data.running} 실행 중...`, 'running');
+                setTimeout(refreshRecovery, 2000);
+                return;
+            }
+
+            const last = data.last || {};
+            if (last.action) {
+                const when = last.finished ? new Date(last.finished * 1000).toLocaleTimeString() : '-';
+                const ok = last.status === 'success';
+                let text = `${RECOVERY_LABELS[last.action] || last.action}: ${ok ? '성공' : '실패'} (${when})`;
+                if (data.cooldown_left > 0) {
+                    text += ` | 재시도 ${data.cooldown_left}초 후`;
+                }
+                setRecoveryStatus(text, ok ? 'ok' : 'error');
+            }
+            if (recoveryWatching) {
+                recoveryWatching = false;
+                if (recoveryWebDown || (last.action || '').startsWith('reset')) {
+                    reconnectCameras();
+                }
+                recoveryWebDown = false;
+            }
+        }
+
+        function toggleRecoveryLog() {
+            const box = document.getElementById('recovery-log');
+            box.style.display = box.style.display === 'none' ? 'block' : 'none';
+            if (box.style.display === 'block') {
+                refreshRecovery();
+            }
+        }
+
         setInterval(updateStatus, 2000);
         updateStatus();
+        refreshRecovery();
     </script>
 </body>
 </html>

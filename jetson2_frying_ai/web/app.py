@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from fastapi import FastAPI, Body
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import camera_recovery
 from .mjpeg import mjpeg_stream
 
 
@@ -122,6 +124,27 @@ def create_app(
     @app.get("/api/config")
     async def get_config():
         return JSONResponse(config)
+
+    recovery_cooldown = int(config.get("camera_recovery_cooldown_sec", 300))
+
+    @app.get("/api/camera-recovery/status")
+    async def camera_recovery_status():
+        return JSONResponse(await run_in_threadpool(camera_recovery.get_status, recovery_cooldown))
+
+    @app.post("/api/camera-recovery/{action}")
+    async def camera_recovery_start(action: str):
+        result = await run_in_threadpool(camera_recovery.start_action, action, recovery_cooldown)
+        if state is not None:
+            try:
+                state._log_ops_event(
+                    "camera_recovery_request",
+                    action=action,
+                    ok=result.get("ok"),
+                    error=result.get("error"),
+                )
+            except Exception:
+                pass
+        return JSONResponse(result)
 
     if state is not None:
         def _mqtt_publish(topic: str, payload: str, qos: int | None = None) -> bool:
