@@ -13,6 +13,21 @@ from . import camera_recovery
 from .mjpeg import mjpeg_stream
 
 
+class _NoCacheStaticFiles(StaticFiles):
+    """배포 후 키오스크 브라우저가 옛 CSS/폰트를 캐시에서 그대로 쓰지 않도록 매번 재검증."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+def _camera_status(cam) -> dict:
+    # alive=False: 카메라 스레드 종료(시작 재시도 실패 등) → 대시보드에서 '시작 실패' 표시
+    is_alive = getattr(cam, "is_alive", None)
+    return {**cam.stats, "alive": bool(is_alive()) if callable(is_alive) else True}
+
+
 def create_app(
     cameras: Dict[int, object],
     frying_workers: Dict[int, object],
@@ -22,16 +37,17 @@ def create_app(
     state: Optional[object] = None,
 ) -> FastAPI:
     app = FastAPI(title="Jetson2 Dashboard", version="1.0")
+    server_started = time.time()  # 대시보드가 웹 재시작을 감지해 카메라 스트림을 다시 연결하는 기준
 
     base_dir = Path(__file__).resolve().parent
     template_path = base_dir / "templates" / "dashboard.html"
     static_dir = base_dir / "static"
 
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    app.mount("/static", _NoCacheStaticFiles(directory=str(static_dir)), name="static")
 
     @app.get("/")
     async def index():
-        return FileResponse(str(template_path))
+        return FileResponse(str(template_path), headers={"Cache-Control": "no-cache"})
 
     @app.get("/mjpeg/cam{cam_id}")
     async def mjpeg(cam_id: int):
@@ -45,7 +61,7 @@ def create_app(
     @app.get("/api/status")
     async def status():
         cameras_status = {
-            f"cam{i}": cam.stats for i, cam in cameras.items() if cam is not None
+            f"cam{i}": _camera_status(cam) for i, cam in cameras.items() if cam is not None
         }
         frying_status = {
             f"pot{i}": worker.get_result() for i, worker in frying_workers.items()
@@ -113,6 +129,7 @@ def create_app(
         return JSONResponse(
             {
                 "timestamp": time.time(),
+                "server_started": server_started,
                 "cameras": cameras_status,
                 "frying": frying_status,
                 "observe": observe_status,

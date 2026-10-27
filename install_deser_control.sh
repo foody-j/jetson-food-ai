@@ -56,8 +56,15 @@ Description=GMSL camera recovery (%i)
 Type=oneshot
 User=root
 Environment="PYTHONPATH=$USER_SITE"
+# 릴레이 스크립트 출력을 바로 로그에 기록 (대시보드 Log 에 진행 상황이 실시간으로 보이게)
+Environment=PYTHONUNBUFFERED=1
+# 장비별 릴레이 설정(WIRING, RELAY_PORT, I2C_BUS 등)은 이 파일에 KEY=값 형식으로 (없으면 기본값)
+# 터미널에서 reset_deser_and_init_cameras.sh 를 직접 실행할 때도 같은 파일을 읽음
+EnvironmentFile=-/etc/default/deser-control
 WorkingDirectory=$SCRIPT_DIR
 ExecStart=$SCRIPT_DIR/deser_control.sh %i
+# 타임아웃/강제 중지로 끝나도 상태를 기록하고, 신호로 끊긴 리셋 뒤 꺼진 jetson2-web 을 다시 시작
+ExecStopPost=-$SCRIPT_DIR/deser_control.sh --post %i
 TimeoutStartSec=300
 StandardOutput=journal
 StandardError=journal
@@ -87,13 +94,31 @@ sudo systemctl daemon-reload
 
 echo "[4] 비밀번호 없이 실행되는지 확인 (릴레이 상태 조회 — 전원 변경 없음)"
 sudo -k  # 캐시된 sudo 인증을 지워서 NOPASSWD 규칙만으로 실행되는지 확인
+STATUS_LOG="/run/deser-control/relay-status.log"
+T0="$(date +%s)"
 if sudo -n "$SYSTEMCTL" start --no-block deser-control@relay-status.service; then
-    sleep 5
-    cat /run/deser-control/relay-status.log 2>/dev/null || true
+    # 릴레이가 무응답이면 조회 재시도로 6초 이상 걸림 → 고정 대기 대신 종료 줄이 기록될 때까지 대기
+    for _ in $(seq 1 30); do
+        sleep 1
+        if [ "$(stat -c %Y "$STATUS_LOG" 2>/dev/null || echo 0)" -ge "$T0" ] \
+            && grep -q '종료:' "$STATUS_LOG" 2>/dev/null; then
+            break
+        fi
+    done
+    cat "$STATUS_LOG" 2>/dev/null || true
+    if grep -q '시작: relay-status' "$STATUS_LOG" 2>/dev/null; then
+        echo "  ✓ 비밀번호 없이 복구 서비스 실행 확인"
+        echo "    (릴레이가 '(no response)' / failed 여도 설치는 정상 — 상태 조회에 응답하지 않는 릴레이는"
+        echo "     대시보드에서 '칩 리셋 (릴레이 무시)' 버튼 사용)"
+    fi
 else
     echo "[WARN] sudo -n 실행 실패 — $SUDOERS_FILE 확인 필요"
 fi
 
 echo ""
-echo "설치 완료. jetson2-web 을 재시작하면 대시보드에 'Camera Recovery' 버튼이 활성화됩니다:"
+echo "설치 완료. jetson2-web 을 재시작하면 대시보드의 '카메라 복구' 버튼이 활성화됩니다:"
 echo "  sudo systemctl restart jetson2-web"
+echo "  (웹이 다시 뜬 뒤(약 1분) 이미 열려 있는 대시보드/키오스크 화면은 F5 로 새로고침)"
+echo "릴레이 배선/포트가 기본값(nc, CH340 by-id, I2C bus 9)과 다르거나 카메라가 4대가 아니면"
+echo "/etc/default/deser-control 에 WIRING=no / RELAY_PORT=/dev/serial/by-id/... / I2C_BUS=9 /"
+echo "EXPECTED_CAMERAS=3 처럼 적어 두세요 (대시보드와 터미널 수동 실행 모두 적용)."

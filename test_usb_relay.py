@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import re
+import signal
 import sys
 import time
 
@@ -23,11 +25,13 @@ DEFAULT_COMMAND_RETRIES = 3
 DEFAULT_RETRY_DELAY_S = 0.35
 DEFAULT_POST_WRITE_DELAY_S = 0.1
 DEFAULT_HOLD_S = 10.0
+STATUS_READ_TIMEOUT_S = 1.0
 
 # Relay protocol (channel 1)
 CMD_ON = bytes([0xA0, 0x01, 0x01, 0xA2])
 CMD_OFF = bytes([0xA0, 0x01, 0x00, 0xA1])
 CMD_STATUS = bytes([0xFF])
+STATUS_PATTERN = re.compile(rb"CH\d+:\s*(ON|OFF)")  # 유효한 상태 응답 예: "CH1: OFF"
 
 
 def open_serial(port: str) -> serial.Serial:
@@ -69,7 +73,8 @@ def send_command(
             ser.write(payload)
             ser.flush()
             time.sleep(post_write_delay_s)
-            print(f"[TX] {label} sent (attempt {attempt}/{retries})")
+            suffix = f" (attempt {attempt}/{retries})" if attempt > 1 else ""
+            print(f"[TX] {label} sent{suffix}")
             return
         except SerialException as exc:
             last_error = exc
@@ -80,6 +85,21 @@ def send_command(
         raise last_error
 
 
+def send_state_command(
+    ser: serial.Serial,
+    payload: bytes,
+    label: str,
+    retries: int,
+    retry_delay_s: float,
+    post_write_delay_s: float,
+) -> None:
+    # ON/OFF 는 절대 상태 명령이라 여러 번 보내도 결과가 같음 → 프레임 유실 대비 retries 회 반복 전송
+    for i in range(1, retries + 1):
+        send_command(ser, payload, f"{label} [{i}/{retries}]", retries, retry_delay_s, post_write_delay_s)
+        if i < retries:
+            time.sleep(retry_delay_s)
+
+
 def relay_on(
     ser: serial.Serial,
     wiring: str,
@@ -87,7 +107,7 @@ def relay_on(
     retry_delay_s: float,
     post_write_delay_s: float,
 ) -> None:
-    send_command(ser, CMD_ON, "relay ON", retries, retry_delay_s, post_write_delay_s)
+    send_state_command(ser, CMD_ON, "relay ON", retries, retry_delay_s, post_write_delay_s)
     if wiring == "nc":
         print("[ACTION] Relay 1 ON command sent (NC wiring: DRIVER POWER OFF)")
     else:
@@ -101,7 +121,7 @@ def relay_off(
     retry_delay_s: float,
     post_write_delay_s: float,
 ) -> None:
-    send_command(ser, CMD_OFF, "relay OFF", retries, retry_delay_s, post_write_delay_s)
+    send_state_command(ser, CMD_OFF, "relay OFF", retries, retry_delay_s, post_write_delay_s)
     if wiring == "nc":
         print("[ACTION] Relay 1 OFF command sent (NC wiring: DRIVER POWER ON)")
     else:
@@ -114,24 +134,27 @@ def read_status(
     retry_delay_s: float,
     post_write_delay_s: float,
 ) -> str:
-    ser.reset_input_buffer()
-    send_command(ser, CMD_STATUS, "relay status query", retries, retry_delay_s, post_write_delay_s)
-    print("[ACTION] Relay status query sent")
-    time.sleep(0.2)
+    # 무응답이거나 잘린/엉뚱한 응답이면 질의를 다시 보내고, "CH1: ON|OFF" 형식만 유효로 인정
+    for attempt in range(1, retries + 1):
+        send_command(ser, CMD_STATUS, "relay status query", retries, retry_delay_s, post_write_delay_s)
+        buf = b""
+        deadline = time.time() + STATUS_READ_TIMEOUT_S
+        while time.time() < deadline and b"\n" not in buf:
+            chunk = ser.read(ser.in_waiting or 1)
+            if not chunk and STATUS_PATTERN.search(buf):
+                break
+            buf += chunk
+        if STATUS_PATTERN.search(buf):
+            text = buf.decode("ascii", errors="replace").strip()
+            print(f"[INFO] Status response (ascii): {text}")
+            return text
+        print(f"[WARN] Status attempt {attempt}/{retries}: {buf.hex(' ') if buf else 'no bytes'}")
+        if attempt < retries:
+            time.sleep(retry_delay_s)
 
-    raw = ser.read(ser.in_waiting or 1)
-    if not raw:
-        msg = "(no response)"
-        print(f"[INFO] Status response: {msg}")
-        return msg
-
-    text = raw.decode("ascii", errors="replace").strip()
-    if not text:
-        text = raw.hex(" ")
-        print(f"[INFO] Status response (hex): {text}")
-    else:
-        print(f"[INFO] Status response (ascii): {text}")
-    return text
+    msg = "(no response)"
+    print(f"[INFO] Status response: {msg}")
+    return msg
 
 
 def parse_args() -> argparse.Namespace:
@@ -165,7 +188,7 @@ def parse_args() -> argparse.Namespace:
         "--retries",
         type=int,
         default=DEFAULT_COMMAND_RETRIES,
-        help=f"Command send retries for slow relay boards (default: {DEFAULT_COMMAND_RETRIES})",
+        help=f"ON/OFF: frames sent (repeated, idempotent); status: query attempts (default: {DEFAULT_COMMAND_RETRIES})",
     )
     parser.add_argument(
         "--retry-delay",
@@ -188,8 +211,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _raise_keyboard_interrupt(signum, frame):
+    raise KeyboardInterrupt
+
+
 def main() -> int:
     args = parse_args()
+    # SIGTERM / SIGHUP(SSH 끊김)도 Ctrl-C 처럼 처리 → test 모드 대기 중 중단돼도 릴레이 OFF 전송.
+    # 단, 호출자가 일부러 무시(SIG_IGN)한 신호는 그대로 둠 (nohup 실행, 리셋 스크립트의 복구 단계 —
+    # 이때는 SSH 가 끊겨도 12V 인가 명령을 끝까지 전송해야 함)
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        if signal.getsignal(sig) is not signal.SIG_IGN:
+            signal.signal(sig, _raise_keyboard_interrupt)
     ser = None
     try:
         print(
@@ -209,11 +242,15 @@ def main() -> int:
             read_status(ser, max(1, args.retries), max(0.0, args.retry_delay), max(0.0, args.post_write_delay))
         else:
             print("[TEST] Note: ON/OFF power meaning follows selected wiring mode")
-            relay_on(ser, args.wiring, max(1, args.retries), max(0.0, args.retry_delay), max(0.0, args.post_write_delay))
-            hold_s = max(0.0, args.hold)
-            print(f"[INFO] Waiting {hold_s:.1f} seconds")
-            time.sleep(hold_s)
-            relay_off(ser, args.wiring, max(1, args.retries), max(0.0, args.retry_delay), max(0.0, args.post_write_delay))
+            try:
+                # ON 반복 전송 중에 중단돼도 OFF 전송 (OFF 는 절대 상태 명령이라 중복 전송해도 무해)
+                relay_on(ser, args.wiring, max(1, args.retries), max(0.0, args.retry_delay), max(0.0, args.post_write_delay))
+                hold_s = max(0.0, args.hold)
+                print(f"[INFO] Waiting {hold_s:.1f} seconds")
+                time.sleep(hold_s)
+            finally:
+                # 대기 중 중단돼도 릴레이를 OFF 로 되돌림 (NC 배선: 12V 다시 인가)
+                relay_off(ser, args.wiring, max(1, args.retries), max(0.0, args.retry_delay), max(0.0, args.post_write_delay))
             time.sleep(0.2)
             read_status(ser, max(1, args.retries), max(0.0, args.retry_delay), max(0.0, args.post_write_delay))
             print("[TEST] Sequence completed")

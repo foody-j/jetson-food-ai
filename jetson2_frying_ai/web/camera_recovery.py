@@ -14,9 +14,12 @@ from typing import Optional
 
 STATE_DIR = Path("/run/deser-control")
 STATE_FILE = STATE_DIR / "state.json"
+LAST_RESET_FILE = STATE_DIR / "last_reset.json"  # 마지막으로 성공한 리셋 (쿨다운 기준)
 UNIT_TEMPLATE = "deser-control@{}.service"
 ACTIONS = ("reset", "reset-skip-relay", "relay-status")
 RESET_ACTIONS = ("reset", "reset-skip-relay")
+# deactivating: 중단 신호를 받은 리셋 스크립트가 원상복구 중인 상태
+RUNNING_STATES = ("activating", "active", "reloading", "deactivating")
 LOG_TAIL_LINES = 60
 
 
@@ -30,7 +33,7 @@ def is_installed() -> bool:
 
 
 def _running_action() -> Optional[str]:
-    """실행 중인(activating) 복구 작업 이름. 없으면 None."""
+    """실행 중인 복구 작업 이름. 없으면 None."""
     for action in ACTIONS:
         try:
             res = subprocess.run(
@@ -39,16 +42,17 @@ def _running_action() -> Optional[str]:
             )
         except Exception:
             continue
-        if res.stdout.strip() in ("activating", "active", "reloading"):
+        if res.stdout.strip() in RUNNING_STATES:
             return action
     return None
 
 
-def _read_state() -> dict:
+def _read_json(path: Path) -> dict:
     try:
-        return json.loads(STATE_FILE.read_text())
+        data = json.loads(path.read_text())
     except Exception:
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _read_log_tail(action: str) -> str:
@@ -59,22 +63,32 @@ def _read_log_tail(action: str) -> str:
     return "\n".join(lines[-LOG_TAIL_LINES:])
 
 
-def get_status(cooldown_sec: int) -> dict:
-    state = _read_state()
-    running = _running_action()
-    last_action = state.get("action")
-    now = time.time()
+def _cooldown_left(cooldown_sec: int, now: float) -> int:
+    """마지막 성공 리셋 후 남은 쿨다운(초). 중단/실패한 리셋과 relay-status 는 영향 없음."""
+    try:
+        finished = float(_read_json(LAST_RESET_FILE)["finished"])
+    except Exception:
+        return 0
+    elapsed = now - finished
+    if elapsed < -5:
+        # 기록 시각이 미래 = 시계가 뒤로 감(NTP/수동 보정) → 실제 경과를 알 수 없으므로 쿨다운 해제
+        return 0
+    return min(cooldown_sec, max(0, int(cooldown_sec - elapsed)))
 
-    cooldown_left = 0
-    if state.get("action") in RESET_ACTIONS and state.get("finished"):
-        cooldown_left = max(0, int(cooldown_sec - (now - float(state["finished"]))))
+
+def get_status(cooldown_sec: int) -> dict:
+    # systemd 를 먼저 확인한 뒤 상태 파일을 읽어야, '실행 중 아님'일 때 읽은 상태가 최종 결과임
+    running = _running_action()
+    state = _read_json(STATE_FILE)
+    now = time.time()
+    log_action = running or state.get("action")
 
     return {
         "installed": is_installed(),
         "running": running,
         "last": state,
-        "log": _read_log_tail(running or last_action) if (running or last_action) else "",
-        "cooldown_left": cooldown_left,
+        "log": _read_log_tail(log_action) if log_action in ACTIONS else "",
+        "cooldown_left": _cooldown_left(cooldown_sec, now),
         "timestamp": now,
     }
 
@@ -91,11 +105,13 @@ def start_action(action: str, cooldown_sec: int) -> dict:
         return {"ok": False, "error": "busy", "message": f"{running} 실행 중"}
 
     if action in RESET_ACTIONS:
-        cooldown_left = get_status(cooldown_sec)["cooldown_left"]
+        cooldown_left = _cooldown_left(cooldown_sec, time.time())
         if cooldown_left > 0:
             return {"ok": False, "error": "cooldown",
                     "message": f"직전 리셋 후 {cooldown_left}초 뒤에 다시 시도하세요"}
 
+    # 대시보드가 이 시각 이후에 시작된 실행 결과만 이번 요청의 결과로 인정 (시작 실패 감지용)
+    requested_at = time.time()
     cmd = ["sudo", "-n", _systemctl(), "start", "--no-block", UNIT_TEMPLATE.format(action)]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -104,4 +120,4 @@ def start_action(action: str, cooldown_sec: int) -> dict:
     if res.returncode != 0:
         return {"ok": False, "error": "sudo_failed",
                 "message": (res.stderr or res.stdout).strip()[:300]}
-    return {"ok": True, "action": action}
+    return {"ok": True, "action": action, "requested_at": requested_at}

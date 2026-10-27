@@ -213,6 +213,9 @@
 
 #### 해결 방법
 * `test_usb_relay.py`에 포트 오픈 직후 DTR/RTS 비활성화, 초기 대기(`--init-delay 1.5~2.5`), 버퍼 초기화, 반복 전송(`--retries 3~5`) 적용 완료:
+  * ON/OFF는 절대 상태 명령이라 `--retries` 횟수만큼 같은 프레임을 반복 전송 (2026-10-27부터. 이전에는 쓰기 예외 때만 재시도해 사실상 1회 전송이었음).
+  * 상태 조회(`--mode status`)는 `CH1: ON/OFF` 형식 응답이 올 때까지 최대 `--retries`회 재질의, 잡음 바이트는 응답으로 인정하지 않음.
+  * `--mode test`(기본값) ON 전송·대기 중 Ctrl-C/SIGTERM/SSH 끊김이 와도 릴레이 OFF를 보내고 종료 (NC 배선에서 12V 차단 상태로 남지 않음). `nohup` 등으로 무시(SIG_IGN)된 신호는 그대로 무시하고 명령을 끝까지 전송.
   ```bash
   python3 test_usb_relay.py --mode on --wiring nc --init-delay 2.0 --retries 5
   ```
@@ -297,16 +300,36 @@ sudo env PYTHONPATH=$HOME/.local/lib/python3.10/site-packages ./reset_deser_and_
 * 출력: `리셋 전 [0x84 0x42 0x07] → 리셋 후 [0x04 0x02 0x00]`, 칩 ID `0xa0`, `/dev/video0~3` 설정 4/4.
 * 서비스 재시작 후 `Camera 0~3 started successfully`, Observe AI `cam2/cam3 status_change (INIT → NO_BASKET)` → 프레임 수신 확인.
 * 릴레이가 실제로 동작하지 않아도 위험 없음: 릴레이 명령은 시리얼 쓰기만 성공하고 넘어가며, 결과적으로 **12V 차단 없이 RESET_ALL + 드라이버 재로드**만 수행됨. NC 배선이라 릴레이가 멈추거나 USB를 뽑아도 12V는 인가 상태.
+* `--skip-relay-check`는 릴레이 포트가 없거나 릴레이 스크립트가 실패해도(pySerial 없음 등) 릴레이 명령을 빼고 I2C 리셋을 계속함. 기본 모드는 이런 경우 아무것도 바꾸지 않고 종료코드 `10`으로 중단.
+* 12V 차단 명령을 보낸 뒤 인가 명령이 실패하면 3회 재시도하고, 그래도 실패하면(`--skip-relay-check` 포함) 복구 경로에서 한 번 더 인가한 뒤 실패(`1`)로 종료 — 12V가 끊긴 채 끝나지 않게 함.
+* 릴레이 상태 응답은 `CH1: OFF`/`CH1:OFF` 처럼 공백 유무와 관계없이 인식.
+* 수동 실행 중 Ctrl-C나 SSH 끊김이 와도 12V 인가 → 드라이버 재로드 → 중지했던 서비스 재시작을 자동으로 수행함 (약 30초, 복구 중 추가 Ctrl-C·끊김 신호는 무시, 복구 출력: `/tmp/deser_reset_interrupted.log`). `nohup`으로 실행하면 SSH가 끊겨도 리셋이 끝까지 진행됨. `kill -9`로 강제 종료한 경우에는 다시 실행한 뒤 `systemctl is-active jetson2-web`으로 웹이 떠 있는지 확인.
+* 대시보드 작업과 같은 잠금(`/run/deser-control/lock`)을 써서, 대시보드 리셋이 도는 중에는 수동 실행이 거부됨 (반대도 같음).
+* 성공 판정: 리셋 전에 있던 `/dev/video*` 노드가 모두 다시 설정되어야 종료코드 `0`, 일부만 돌아오면 실패(`1`). 리셋 전 노드가 없었으면(드라이버 미로드) `EXPECTED_CAMERAS`(기본 4, Jetson #1은 3으로 설정) 기준. 노드 설정 기준이므로 실제 프레임 수신은 대시보드 상태(`정상 N fps`)나 스크립트 끝에 출력되는 `v4l2-ctl --stream-mmap` 명령으로 확인.
+* 장비별 설정 파일 `/etc/default/deser-control`(`WIRING`, `RELAY_PORT`, `I2C_BUS`, `EXPECTED_CAMERAS` 등, `KEY=값`)은 대시보드와 수동 실행 모두 적용. 우선순위: CLI 인자 > 환경변수 > 설정 파일 > 기본값.
 
 #### 웹 대시보드에서 실행 (Jetson #2, 2026-10-27 추가)
-* 대시보드 상단에 카메라 멈춤 경고(5초 이상 새 프레임 없음)가 뜨고, `칩 리셋` / `칩 리셋 (릴레이 무시)` / `릴레이 상태` 버튼으로 같은 작업을 실행할 수 있음.
-* 최초 1회 설치 (웹 서비스 사용자 계정으로, sudo 없이 실행 → 내부에서 sudo 비밀번호 요청):
+* 카메라 상태 표시: 새 프레임이 5초 이상 없으면 주황 `변화 없음`, 30초(`camera_stall_alert_sec`) 이상이면 빨강 `멈춤` + 상단 경고 줄에 리셋 버튼. 카메라 스레드가 시작 재시도에 모두 실패하면 `시작 실패`.
+* 버튼: `칩 리셋` / `칩 리셋 (릴레이 무시)` / `릴레이 상태`. 리셋 중에는 경고 줄이 라벤더색 `카메라 복구 진행 중`으로 바뀌고, 웹이 재시작되면 카메라 영상이 자동으로 다시 연결됨 (다른 화면·키오스크 포함).
+* 최초 1회 설치 (웹 서비스 사용자 계정으로, sudo 없이 실행 → 내부에서 sudo 비밀번호 요청). **이 스크립트가 바뀐 버전을 받은 뒤에도 한 번 다시 실행** (systemd 유닛 갱신):
   ```bash
-  cd ~/jetson-food-ai && git pull && ./install_deser_control.sh
-  sudo systemctl restart jetson2-web
+  cd ~/jetson-food-ai
+  git status -s            # 로컬 수정 확인 (vibration_config.json 같은 장비별 설정은 그대로 둠)
+  git pull                 # 'local changes would be overwritten' 으로 멈추면: git stash && git pull && git stash pop
+  ./install_deser_control.sh
+  sudo systemctl restart jetson2-web     # 튀김/바켓 AI 약 1분 중단 → 조리가 없는 시간에
+  until curl -fsS http://127.0.0.1:8000/ >/dev/null; do sleep 2; done; echo 웹 준비됨
+  # 그다음 이미 열려 있는 대시보드/키오스크 화면을 F5 로 새로고침
   ```
+  * `git checkout .` / `git reset --hard` 로 정리하지 말 것 — 장비별 `vibration_config.json` 튜닝이 지워짐.
+  * pull → install → restart 를 바로 이어서 실행 (pull 과 restart 사이에는 옛 서버가 새 화면을 내보내 복구 버튼이 `미설치`로 보일 수 있음).
+  * 설치 스크립트의 릴레이 확인에서 `(no response)` / `failed, rc=4` 가 나와도 설치는 정상 (`시작: relay-status` 줄이 있으면 sudo·서비스 동작 확인됨).
 * 구조: 버튼 → `sudo -n systemctl start --no-block deser-control@<동작>.service` (sudoers 에 이 3개만 허용) → root 로 `deser_control.sh` 실행. 리셋이 `jetson2-web` 을 중지해도 별도 서비스라 끝까지 진행되고 웹은 자동 재시작됨.
-* 진행 로그: 대시보드 `Log` 버튼, 또는 `/run/deser-control/<동작>.log`. 리셋 후 300초 쿨다운(`camera_recovery_cooldown_sec`).
+* 결과 표시: `성공` / `중단 — 변경 없음`(사전 점검에서 멈춤, 릴레이 무응답·포트 없음·릴레이 스크립트 실패면 `칩 리셋 (릴레이 무시)` 사용 안내) / `실패` / `시작 실패`(유닛이 실행되지 못함 → `journalctl -u deser-control@<동작>`). 다른 화면·기기에서 시작한 작업도 따라가서 결과를 표시. 웹이 10분 넘게 돌아오지 않으면 `대시보드 서버 응답 없음` → SSH로 `jetson2-web` 확인.
+* 쿨다운: **성공한 리셋** 후 300초(`camera_recovery_cooldown_sec`, 표시: `칩 리셋 재시도 N초 후`). 중단·실패한 리셋과 `릴레이 상태` 조회는 쿨다운을 만들거나 지우지 않음 → 릴레이 무응답으로 `칩 리셋`이 중단되면 바로 `칩 리셋 (릴레이 무시)` 가능. 시계가 뒤로 보정되면 쿨다운은 해제됨.
+* 안전장치: 리셋이 중간에 끊겨도(systemd 중지·타임아웃) 리셋 스크립트가 12V 인가 → 드라이버 재로드 → 서비스 재시작을 수행하고, 그래도 상태가 `running`으로 남으면 `ExecStopPost`가 실패로 정리함. 신호·타임아웃으로 끊긴 리셋 뒤 `jetson2-web`이 꺼져 있으면 `ExecStopPost`가 다시 시작 (정상 종료한 실패는 리셋 스크립트가 이미 서비스를 되살리므로 건드리지 않음). 커널에서 멈춘 경우(SIGKILL)는 웹만 되살리고 드라이버·릴레이는 복구하지 못함 → SSH로 수동 리셋.
+* 장비별 설정: 배선/포트/버스가 기본값(nc, CH340 by-id, I2C bus 9)과 다르거나 카메라가 4대가 아니면 `/etc/default/deser-control`에 `WIRING=no`, `RELAY_PORT=...`, `I2C_BUS=...`, `EXPECTED_CAMERAS=3` 형식으로 적어 둠 (터미널 수동 실행도 같은 파일을 읽음).
+* 진행 로그: 대시보드 `Log` 버튼(카메라 복구 줄 바로 아래), 또는 `/run/deser-control/<동작>.log`. 상태 파일: `state.json`(마지막 작업), `last_reset.json`(마지막 성공 리셋, 쿨다운 기준).
 
 #### 미확정 사항
 * 이번에 릴레이가 실제로 12V를 끊었는지 모름(칩은 12V 차단 중에도 응답하므로 출력으로 구분 불가). 따라서 "**칩 리셋만으로 stall 복구 가능**"은 유력하지만 확정 아님.

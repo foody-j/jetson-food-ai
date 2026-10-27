@@ -142,6 +142,33 @@ body {
     min-width: 240px;
 }
 
+/* 복구 진행 중: 경보색 대신 라벤더로 진행 상황만 표시 */
+.alert.alert-progress {
+    background: var(--lavender-strong);
+}
+
+.alert-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.alert-actions[hidden] {
+    display: none;
+}
+
+/* 경고 줄 배경 위에서는 상태 색 대신 본문색 (대비 확보) */
+.alert .recovery-status,
+.alert .recovery-running,
+.alert .recovery-ok,
+.alert .recovery-error {
+    color: var(--ink);
+}
+
+.alert .recovery-status:empty {
+    display: none;
+}
+
 /* ---- 카메라 그리드 (주요 근거 → 가장 크게) ---- */
 .grid {
     display: grid;
@@ -174,11 +201,16 @@ body {
     display: block;
     width: 100%;
     aspect-ratio: 5 / 4;
-    /* 헤더·상태줄을 빼고 카메라 2행이 한 화면에 들어오도록 높이 제한 */
-    max-height: calc((100vh - 400px) / 2);
+    /* 헤더·상태줄·복구 버튼 줄을 빼고 카메라 2행이 한 화면에 들어오도록 높이 제한 */
+    max-height: calc((100vh - 440px) / 2);
     min-height: 180px;
     object-fit: contain;
     background: var(--video-bg);
+}
+
+/* 경고 줄이 보이는 동안 그 높이만큼 영상을 줄여 복구 버튼 줄이 화면 밖으로 밀리지 않게 */
+body.has-alert .camera-box img {
+    max-height: calc((100vh - 500px) / 2);
 }
 
 .cam-status {
@@ -350,6 +382,10 @@ body {
     border-radius: 4px;
     font-family: var(--mono);
     font-size: 12px;
+}
+
+.recovery-log-box {
+    padding: 4px 12px 10px;
 }
 
 .recovery-log-text {

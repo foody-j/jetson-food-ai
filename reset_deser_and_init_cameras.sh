@@ -14,9 +14,22 @@
 #   [3/5] 릴레이 12V 인가(기본 8초) + 디시리얼라이저 칩(0x6b -> 0xa0) 응답 확인
 #   [4/5] GMSL 커널 드라이버 로드 (max96712.ko -> sgx-yuv-gmsl2.ko)
 #   [5/5] NVCSI 클럭 설정, V4L2 센서 모드 설정 및 중지했던 서비스 재시작
+#
+# 장비별 설정: /etc/default/deser-control (KEY=값, 대시보드 systemd 유닛과 같은 파일)
+#   WIRING, RELAY_PORT, I2C_BUS, DESER_ADDR, OFF_DELAY_SEC, ON_DELAY_SEC, GMSL_MODE, SENSOR_MODE,
+#   EXPECTED_CAMERAS — 우선순위: CLI 인자 > 환경변수 > 이 파일 > 기본값
+#
+# 종료 코드:
+#   0            성공 (리셋 전에 있던 카메라 노드가 모두 다시 설정됨,
+#                리셋 전 노드가 없었으면 EXPECTED_CAMERAS 개)
+#   1            실패 (작업 중 오류 — 12V 인가/드라이버/서비스 복구를 시도한 뒤 종료)
+#   10           사전 점검에서 중단, 아무것도 변경하지 않음 (웹 대시보드 쿨다운 미적용)
+#   129/130/143  신호(HUP/INT/TERM)로 중단 — 12V 인가/드라이버/서비스 복구 후 종료
 # ==============================================================================
 
 set -u
+
+EXIT_ABORTED=10
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 RELAY_SCRIPT="${RELAY_SCRIPT:-$SCRIPT_DIR/test_usb_relay.py}"
@@ -39,13 +52,31 @@ done
 
 if [ -z "$DRIVER_DIR" ]; then
     echo "[ERROR] SG4A 드라이버 디렉토리를 찾을 수 없습니다."
-    exit 1
+    exit "$EXIT_ABORTED"
 fi
 
 KO_DIR="$DRIVER_DIR/ko"
 CLOCK_SCRIPT="$DRIVER_DIR/clock_config.sh"
 
-# 기본 파라미터 (환경변수 또는 CLI 인자로 변경 가능)
+# 장비별 설정 파일 — 터미널 수동 실행에도 적용 (sudo 는 환경변수를 넘기지 않으므로 직접 읽음)
+# 환경변수로 이미 받은 값은 그대로 두고, 파일은 셸 코드로 실행하지 않고 KEY=값 만 읽음
+DEFAULTS_FILE="/etc/default/deser-control"
+if [ -r "$DEFAULTS_FILE" ]; then
+    while IFS='=' read -r key val || [ -n "$key" ]; do
+        key="${key//[[:space:]]/}"
+        case "$key" in
+            WIRING|RELAY_PORT|I2C_BUS|DESER_ADDR|OFF_DELAY_SEC|ON_DELAY_SEC|GMSL_MODE|SENSOR_MODE|EXPECTED_CAMERAS)
+                val="${val#"${val%%[![:space:]]*}"}"   # 앞뒤 공백(CR 포함) 제거
+                val="${val%"${val##*[![:space:]]}"}"
+                val="${val%\"}"; val="${val#\"}"
+                val="${val%\'}"; val="${val#\'}"
+                [ -n "${!key:-}" ] || printf -v "$key" '%s' "$val"
+                ;;
+        esac
+    done < "$DEFAULTS_FILE"
+fi
+
+# 기본 파라미터 (환경변수, 위 설정 파일 또는 CLI 인자로 변경 가능)
 WIRING="${WIRING:-nc}"               # nc(기본): 릴레이 ON=전원차단, 릴레이 OFF=전원인가
 RELAY_PORT="${RELAY_PORT:-/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0}"
 I2C_BUS="${I2C_BUS:-9}"              # SG4A MAX96712 I2C 버스 번호 (기본: 9)
@@ -54,8 +85,18 @@ OFF_DELAY_SEC="${OFF_DELAY_SEC:-5}"  # 전원 차단 후 완전 방전 대기 �
 ON_DELAY_SEC="${ON_DELAY_SEC:-8}"    # 전원 인가 후 디시리얼라이저 선(先)부팅 대기 시간(초)
 GMSL_MODE="${GMSL_MODE:-2,2,2,2}"    # GMSL2/3G (2,2,2,2)
 SENSOR_MODE="${SENSOR_MODE:-1}"      # 1 = 1920x1536
+EXPECTED_CAMERAS="${EXPECTED_CAMERAS:-4}"  # 리셋 전 노드가 없을 때(드라이버 미로드) 성공 기준 카메라 수
+case "$EXPECTED_CAMERAS" in ''|*[!0-9]*) EXPECTED_CAMERAS=4 ;; esac
 DO_REBOOT=false
-SKIP_RELAY_CHECK="${SKIP_RELAY_CHECK:-false}"  # true: 릴레이 상태 무응답이어도 계속 진행
+SKIP_RELAY_CHECK="${SKIP_RELAY_CHECK:-false}"  # true: 릴레이 무응답/사용 불가여도 I2C 리셋 진행
+
+RELAY_USABLE=true   # false: 릴레이 포트/스크립트 사용 불가 (--skip-relay-check 에서만) → 릴레이 명령 생략
+POWER_CUT=0         # 1: 12V 차단 명령을 보낸 상태 (복구 시 전원 인가 후 안정화 대기 필요)
+EXPECTED_COUNT=0    # 리셋 전 존재하던 /dev/video0~3 개수 (리셋 후 모두 돌아와야 성공)
+SUCCESS_COUNT=0
+RELAY_POWER=unknown
+# 신호로 중단될 때 복구 출력 기록 위치 (deser_control.sh 가 대시보드 로그 경로를 넘겨줌)
+INTERRUPT_LOG="${DESER_LOG_FILE:-/tmp/deser_reset_interrupted.log}"
 
 usage() {
     cat <<EOF
@@ -63,13 +104,15 @@ usage() {
 
 옵션:
   --reboot             디시리얼라이저 리셋(ON 유지) 후 젯슨을 즉시 재부팅(sudo reboot)
-  --skip-relay-check   릴레이 상태 조회 무응답이어도 계속 진행 (릴레이 무동작 시 I2C 리셋 + 드라이버 재로드만 수행됨)
+  --skip-relay-check   릴레이가 무응답이거나 사용할 수 없어도 진행 (이때는 12V 차단 없이 I2C 리셋 + 드라이버 재로드만 수행됨)
   --wiring <nc|no>     릴레이 배선 방식 (기본값: $WIRING)
   --port <path>        USB 릴레이 시리얼 포트 경로 (기본값: $RELAY_PORT)
   --i2c-bus <num>      MAX96712 I2C 버스 번호 (기본값: $I2C_BUS)
   --off-delay <sec>    디시리얼라이저 전원 OFF 방전 대기 초 (기본값: $OFF_DELAY_SEC)
   --on-delay <sec>     디시리얼라이저 전원 ON 후 안정화 대기 초 (기본값: $ON_DELAY_SEC)
   -h, --help           도움말 출력
+
+장비별 기본값은 $DEFAULTS_FILE 에 KEY=값 형식으로 (WIRING, RELAY_PORT, I2C_BUS, EXPECTED_CAMERAS 등)
 EOF
 }
 
@@ -123,6 +166,12 @@ else
     RELAY_CMD_POWER_OFF="off"
     RELAY_CMD_POWER_ON="on"
 fi
+# 12V 인가 상태일 때 릴레이 상태 조회 응답 (NC: "CH1: OFF")
+# 보드/펌웨어마다 콜론 뒤 공백이 다를 수 있어("CH1:OFF") 비교는 정규식으로
+RELAY_ON_WORD="$(echo "$RELAY_CMD_POWER_ON" | tr '[:lower:]' '[:upper:]')"
+RELAY_IDLE_STATE="CH1: $RELAY_ON_WORD"
+RELAY_IDLE_RE="CH1:[[:space:]]*${RELAY_ON_WORD}([^A-Za-z]|\$)"
+RELAY_STATE_RE='CH1:[[:space:]]*(ON|OFF)'
 
 # 중지한 systemd 서비스 목록 기록 (종료/실패 시 복구용)
 STOPPED_SERVICES=()
@@ -135,6 +184,38 @@ CANDIDATE_SERVICES=(
     "jetson2-monitor.service"
 )
 
+relay_cmd() {
+    # $1=릴레이 동작(on|off|status) $2=init-delay(초) $3=반복 횟수
+    python3 "$RELAY_SCRIPT" --port "$RELAY_PORT" --wiring "$WIRING" --mode "$1" --init-delay "$2" --retries "$3"
+}
+
+check_relay_power() {
+    # 릴레이 상태 조회 → RELAY_POWER: on(12V 인가) / off(12V 차단) / unknown(무응답)
+    local out
+    out="$(relay_cmd status 1.5 3 2>&1)"
+    echo "$out" | grep "Status response" | sed 's/^/    /'
+    if echo "$out" | grep -Eq "$RELAY_IDLE_RE"; then
+        RELAY_POWER=on
+    elif echo "$out" | grep -Eq "$RELAY_STATE_RE"; then
+        RELAY_POWER=off
+    else
+        RELAY_POWER=unknown
+    fi
+}
+
+relay_unusable() {
+    # 릴레이를 쓸 수 없을 때: 기본은 중단, --skip-relay-check 이면 릴레이 명령 없이 진행
+    if [ "$SKIP_RELAY_CHECK" = true ]; then
+        echo "  [WARN] $1 — --skip-relay-check 지정으로 릴레이 없이 진행합니다"
+        echo "         (12V 차단 없이 I2C RESET_ALL + 드라이버 재로드만 수행)"
+        RELAY_USABLE=false
+    else
+        echo "[ERROR] $1. 작업을 중단합니다."
+        echo "        (릴레이 없이 칩 리셋만 하려면 --skip-relay-check 옵션 사용)"
+        exit "$EXIT_ABORTED"
+    fi
+}
+
 restart_stopped_services() {
     if [ "${#STOPPED_SERVICES[@]}" -gt 0 ]; then
         echo ""
@@ -145,18 +226,65 @@ restart_stopped_services() {
     fi
 }
 
+init_cameras() {
+    # NVCSI 클럭 + V4L2 센서 모드 설정 (설정 성공 채널 수 → SUCCESS_COUNT)
+    if [ -f "$CLOCK_SCRIPT" ]; then
+        chmod +x "$CLOCK_SCRIPT" 2>/dev/null || true
+        sudo "$CLOCK_SCRIPT" 2>/dev/null || true
+        echo "  ✓ 클럭 설정 완료"
+    fi
+
+    SUCCESS_COUNT=0
+    for port in 0 1 2 3; do
+        if [ -e "/dev/video${port}" ]; then
+            if v4l2-ctl --set-ctrl "bypass_mode=0,sensor_mode=${SENSOR_MODE}" -d "/dev/video${port}" 2>/dev/null; then
+                echo "  ✓ /dev/video${port} 제어값(sensor_mode=${SENSOR_MODE}) 설정 완료"
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+            else
+                echo "  ✗ /dev/video${port} v4l2-ctl 설정 실패"
+            fi
+        else
+            echo "  ✗ /dev/video${port} 디바이스 노드 없음"
+        fi
+    done
+}
+
 reload_drivers_and_recover() {
     echo ""
-    echo "[복구] 실패 발생 — 드라이버 재로드 및 서비스 복구를 시도합니다..."
-    python3 "$RELAY_SCRIPT" --port "$RELAY_PORT" --wiring "$WIRING" --mode "$RELAY_CMD_POWER_ON" --init-delay 1.5 --retries 3 >/dev/null 2>&1 || true
+    echo "[복구] 12V 인가 / 드라이버 재로드 / 서비스 복구를 시도합니다..."
+    if [ "$RELAY_USABLE" = true ]; then
+        # 12V 인가 명령은 반복해도 안전 — 결과를 로그에 남김
+        relay_cmd "$RELAY_CMD_POWER_ON" 1.5 3 2>&1 | sed 's/^/  [복구] /'
+        if [ "$POWER_CUT" = 1 ]; then
+            echo "  [복구] 12V 인가 후 ${ON_DELAY_SEC}초 대기 (카메라가 먼저 부팅된 뒤 드라이버 로드)"
+            sleep "$ON_DELAY_SEC"
+            POWER_CUT=0
+        fi
+    fi
     if [ -d "$KO_DIR" ]; then
         (
             cd "$KO_DIR" || exit 0
             lsmod | grep -q "max96712" || sudo insmod max96712.ko 2>/dev/null || true
             lsmod | grep -q "sgx_yuv_gmsl2" || sudo insmod sgx-yuv-gmsl2.ko "GMSLMODE_1=${GMSL_MODE}" 2>/dev/null || true
         )
+        sleep 2
+        init_cameras
     fi
     restart_stopped_services
+}
+
+on_signal() {
+    local code="$1"
+    # 복구 중 추가 신호는 무시 (SSH 끊김은 HUP 가 여러 번 오고 Ctrl-C 를 다시 누를 수도 있음 — SIGKILL 로만 중단).
+    # 무시 상태는 복구 중 실행하는 릴레이 명령에도 상속됨
+    trap '' HUP INT TERM
+    echo "[중단] 신호 수신 — 12V 인가/드라이버/서비스 복구 중 (약 30초, 추가 Ctrl-C 무시, 로그: $INTERRUPT_LOG)" 2>/dev/null
+    # 터미널(SSH)이나 로그 파이프(tee)가 이미 끊겼을 수 있으므로 이후 출력은 파일로
+    exec >>"$INTERRUPT_LOG" 2>&1 || exec >/dev/null 2>&1
+    echo "[중단] $(date '+%F %T') 신호 수신 (종료코드 $code)"
+    reload_drivers_and_recover
+    echo "[중단] $(date '+%F %T') 복구 시도 완료"
+    exit "$code"
 }
 
 read_deser_reg() {
@@ -184,9 +312,15 @@ echo " - 안정화 대기(ON) : ${ON_DELAY_SEC}s"
 echo " - 동작 모드       : $( [ "$DO_REBOOT" = true ] && echo "디시리얼라이저 리셋 후 젯슨 재부팅(--reboot)" || echo "드라이버 재로드 및 카메라 초기화" )"
 echo "============================================================"
 
-if [ ! -f "$RELAY_SCRIPT" ]; then
-    echo "[ERROR] 릴레이 제어 스크립트가 없습니다: $RELAY_SCRIPT"
-    exit 1
+# 대시보드(deser_control.sh)와 터미널 수동 실행이 겹치지 않도록 같은 잠금 사용
+# (deser_control.sh 는 잠금을 잡은 뒤 DESER_LOCK_HELD=1 로 이 스크립트를 실행)
+if [ -z "${DESER_LOCK_HELD:-}" ] && [ "$(id -u)" -eq 0 ]; then
+    mkdir -p /run/deser-control
+    exec 9>>/run/deser-control/lock
+    if ! flock -n 9; then
+        echo "[ERROR] 다른 카메라 복구 작업이 실행 중입니다 (대시보드 또는 다른 터미널). 작업을 중단합니다."
+        exit "$EXIT_ABORTED"
+    fi
 fi
 
 # ------------------------------------------------------------------------------
@@ -194,41 +328,58 @@ fi
 # ------------------------------------------------------------------------------
 echo ""
 echo "[0/5] USB 릴레이 연결 및 응답 점검 중..."
-if [ ! -e "$RELAY_PORT" ]; then
-    echo "[ERROR] 릴레이 시리얼 포트가 존재하지 않습니다: $RELAY_PORT"
-    echo "        (lsusb, ch341 드라이버, brltty 제거 여부를 확인하세요)"
-    exit 1
+if [ ! -f "$RELAY_SCRIPT" ]; then
+    relay_unusable "릴레이 제어 스크립트가 없습니다: $RELAY_SCRIPT"
+elif [ ! -e "$RELAY_PORT" ]; then
+    relay_unusable "릴레이 시리얼 포트가 존재하지 않습니다: $RELAY_PORT (lsusb, ch341 드라이버, brltty 제거 여부 확인)"
+else
+    STATUS_OUT="$(relay_cmd status 1.5 3 2>&1)"
+    STATUS_RC=$?
+    echo "$STATUS_OUT" | sed 's/^/  /'
+    if [ "$STATUS_RC" -ne 0 ]; then
+        relay_unusable "USB 릴레이 제어 스크립트 실행 실패 (pySerial, 포트 권한 등 확인)"
+    elif echo "$STATUS_OUT" | grep -q "(no response)"; then
+        if [ "$SKIP_RELAY_CHECK" = true ]; then
+            echo "  [WARN] USB 릴레이 상태 조회 무응답 — --skip-relay-check 지정으로 계속 진행합니다"
+            echo "         (릴레이가 실제로 동작하지 않으면 12V 차단 없이 I2C RESET_ALL + 드라이버 재로드만 수행됨)"
+        else
+            echo "[ERROR] USB 릴레이가 상태 조회에 응답하지 않습니다. 안전을 위해 작업을 중단합니다."
+            echo "        (응답 없이 진행하려면 --skip-relay-check 옵션 사용)"
+            exit "$EXIT_ABORTED"
+        fi
+    else
+        echo "  ✓ USB 릴레이 응답 정상"
+        if ! echo "$STATUS_OUT" | grep -Eq "$RELAY_IDLE_RE"; then
+            echo "  [WARN] 릴레이가 12V 인가 상태($RELAY_IDLE_STATE)가 아닙니다 — 이번 리셋 [3/5]에서 다시 인가합니다"
+        fi
+    fi
 fi
 
-STATUS_OUT="$(python3 "$RELAY_SCRIPT" --port "$RELAY_PORT" --wiring "$WIRING" --mode status --init-delay 1.5 --retries 3 2>&1)"
-STATUS_RC=$?
-echo "$STATUS_OUT" | sed 's/^/  /'
-if [ "$STATUS_RC" -ne 0 ]; then
-    echo "[ERROR] USB 릴레이 제어 스크립트 실행 실패 (pySerial, 포트 권한 등을 확인하세요). 작업을 중단합니다."
-    exit 1
-elif echo "$STATUS_OUT" | grep -q "(no response)"; then
-    if [ "$SKIP_RELAY_CHECK" = true ]; then
-        echo "  [WARN] USB 릴레이 상태 조회 무응답 — --skip-relay-check 지정으로 계속 진행합니다"
-        echo "         (릴레이가 실제로 동작하지 않으면 12V 차단 없이 I2C RESET_ALL + 드라이버 재로드만 수행됨)"
-    else
-        echo "[ERROR] USB 릴레이가 상태 조회에 응답하지 않습니다. 안전을 위해 작업을 중단합니다."
-        echo "        (응답 없이 진행하려면 --skip-relay-check 옵션 사용)"
-        exit 1
-    fi
-else
-    echo "  ✓ USB 릴레이 응답 정상"
-fi
+# 여기부터 서비스/드라이버/12V 를 바꾸므로, 신호(SSH 끊김 HUP, Ctrl-C INT, systemd 중지 TERM)로
+# 중단돼도 원래 상태로 되돌리도록 트랩 설치.
+# SIGPIPE 는 무시: 출력 파이프(tee)가 먼저 죽으면 bash 가 'Terminated' 등을 쓰다가 트랩 실행 전에 죽음
+trap '' PIPE
+trap 'on_signal 129' HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 # ------------------------------------------------------------------------------
 # [단계 1] 카메라 사용 서비스 중지, 점유 프로세스 확인 및 커널 모듈 언로드
 # ------------------------------------------------------------------------------
 echo ""
 echo "[1/5] 카메라 서비스 임시 중지 및 GMSL 커널 모듈 언로드 중..."
+for port in 0 1 2 3; do
+    if [ -e "/dev/video${port}" ]; then
+        EXPECTED_COUNT=$((EXPECTED_COUNT + 1))
+    fi
+done
+echo "  - 리셋 전 카메라 노드: ${EXPECTED_COUNT}개"
+
 for svc in "${CANDIDATE_SERVICES[@]}"; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
         echo "  - 실행 중인 서비스 중지: $svc"
+        STOPPED_SERVICES+=("$svc")  # 중지 도중 중단돼도 재시작 대상에 들어가도록 먼저 기록
         sudo systemctl stop "$svc"
-        STOPPED_SERVICES+=("$svc")
     fi
 done
 
@@ -270,10 +421,19 @@ echo "  ✓ 커널 모듈 언로드 완료"
 # ------------------------------------------------------------------------------
 echo ""
 echo "[2/5] 디시리얼라이저 12V 전원 차단 (${OFF_DELAY_SEC}초 대기)..."
-if ! python3 "$RELAY_SCRIPT" --port "$RELAY_PORT" --wiring "$WIRING" --mode "$RELAY_CMD_POWER_OFF" --init-delay 2.0 --retries 5; then
-    echo "[ERROR] USB 릴레이 전원 차단 명령 실패!"
-    reload_drivers_and_recover
-    exit 1
+if [ "$RELAY_USABLE" = true ]; then
+    POWER_CUT=1
+    if ! relay_cmd "$RELAY_CMD_POWER_OFF" 2.0 5; then
+        if [ "$SKIP_RELAY_CHECK" = true ]; then
+            echo "  [WARN] USB 릴레이 전원 차단 명령 실패 — 12V 차단 없이 I2C 리셋을 계속합니다"
+        else
+            echo "[ERROR] USB 릴레이 전원 차단 명령 실패!"
+            reload_drivers_and_recover
+            exit 1
+        fi
+    fi
+else
+    echo "  - 릴레이 사용 안 함 → 12V 차단 생략"
 fi
 sleep "$OFF_DELAY_SEC"
 
@@ -303,12 +463,50 @@ fi
 # ------------------------------------------------------------------------------
 echo ""
 echo "[3/5] 디시리얼라이저 12V 전원 인가 (안정화 ${ON_DELAY_SEC}초 대기)..."
-if ! python3 "$RELAY_SCRIPT" --port "$RELAY_PORT" --wiring "$WIRING" --mode "$RELAY_CMD_POWER_ON" --init-delay 2.0 --retries 5; then
-    echo "[ERROR] USB 릴레이 전원 인가 명령 실패!"
-    reload_drivers_and_recover
-    exit 1
+POWER_ON_SENT=false
+if [ "$RELAY_USABLE" = true ]; then
+    for attempt in 1 2 3; do
+        if relay_cmd "$RELAY_CMD_POWER_ON" 2.0 5; then
+            POWER_ON_SENT=true
+            break
+        fi
+        echo "  [WARN] USB 릴레이 전원 인가 명령 실패 (${attempt}/3)"
+        [ "$attempt" -lt 3 ] && sleep 1
+    done
+    if [ "$POWER_ON_SENT" != true ]; then
+        # 12V 차단 명령을 이미 보냈을 수 있으므로 --skip-relay-check 여도 그대로 진행하지 않음
+        # (복구 함수가 한 번 더 인가하고 안정화 대기 후 드라이버를 올림)
+        echo "[ERROR] USB 릴레이 전원 인가 명령 실패! (12V 차단 상태일 수 있음)"
+        reload_drivers_and_recover
+        exit 1
+    fi
 fi
 sleep "$ON_DELAY_SEC"
+if [ "$POWER_ON_SENT" = true ]; then
+    POWER_CUT=0
+fi
+
+# 상태 조회가 되는 릴레이(기본 모드)면 12V 인가를 실제로 확인 — 명령 프레임 유실 대비
+if [ "$POWER_ON_SENT" = true ] && [ "$SKIP_RELAY_CHECK" != true ]; then
+    check_relay_power
+    if [ "$RELAY_POWER" = off ]; then
+        echo "  [WARN] 릴레이가 아직 12V 차단 상태로 응답 → 인가 명령 재전송"
+        relay_cmd "$RELAY_CMD_POWER_ON" 1.5 5 2>&1 | sed 's/^/    /'
+        sleep "$ON_DELAY_SEC"
+        check_relay_power
+        if [ "$RELAY_POWER" = off ]; then
+            echo "[ERROR] 재전송 후에도 릴레이가 12V 차단 상태로 응답합니다 (기대: $RELAY_IDLE_STATE)"
+            POWER_CUT=1
+            reload_drivers_and_recover
+            exit 1
+        fi
+    fi
+    if [ "$RELAY_POWER" = on ]; then
+        echo "  ✓ 릴레이 상태 확인: $RELAY_IDLE_STATE (12V 인가)"
+    else
+        echo "  [WARN] 릴레이 상태 조회 무응답 — 12V 인가 여부를 확인하지 못하고 계속 진행"
+    fi
+fi
 
 if command -v i2ctransfer >/dev/null 2>&1; then
     DEV_ID_ON="$(read_deser_reg 0x00 0x0d)"
@@ -329,6 +527,7 @@ fi
 if [ "$DO_REBOOT" = true ]; then
     echo ""
     echo "[REBOOT] 디시리얼라이저가 먼저 켜진 상태를 유지한 채 젯슨을 재부팅합니다..."
+    trap - HUP INT TERM  # 재부팅 중 받는 TERM 으로 복구 동작이 돌지 않게
     sudo reboot
     exit 0
 fi
@@ -368,37 +567,28 @@ sleep 2
 # ------------------------------------------------------------------------------
 echo ""
 echo "[5/5] NVCSI 클럭 및 카메라 센서 모드(mode=${SENSOR_MODE}) 초기화 중..."
-if [ -f "$CLOCK_SCRIPT" ]; then
-    chmod +x "$CLOCK_SCRIPT" 2>/dev/null || true
-    sudo "$CLOCK_SCRIPT" 2>/dev/null || true
-    echo "  ✓ 클럭 설정 완료"
-fi
-
-SUCCESS_COUNT=0
-for port in 0 1 2 3; do
-    if [ -e "/dev/video${port}" ]; then
-        if v4l2-ctl --set-ctrl "bypass_mode=0,sensor_mode=${SENSOR_MODE}" -d "/dev/video${port}" 2>/dev/null; then
-            echo "  ✓ /dev/video${port} 제어값(sensor_mode=${SENSOR_MODE}) 설정 완료"
-            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-        else
-            echo "  ✗ /dev/video${port} v4l2-ctl 설정 실패"
-        fi
-    else
-        echo "  ✗ /dev/video${port} 디바이스 노드 없음"
-    fi
-done
+init_cameras
 
 restart_stopped_services
+trap - HUP INT TERM
+
+# 성공 기준: 리셋 전에 있던 노드 수. 드라이버가 안 올라가 있어 리셋 전 노드가 없었으면 EXPECTED_CAMERAS
+REQUIRED_COUNT="$EXPECTED_COUNT"
+[ "$EXPECTED_COUNT" -gt 0 ] || REQUIRED_COUNT="$EXPECTED_CAMERAS"
 
 echo ""
 echo "============================================================"
-echo " 초기화 완료 (v4l2 제어 설정 성공 채널: ${SUCCESS_COUNT}/4)"
+echo " 초기화 완료 (v4l2 제어 설정 성공 채널: ${SUCCESS_COUNT}/4, 기준 ${REQUIRED_COUNT}개 — 리셋 전 노드 ${EXPECTED_COUNT}개)"
 echo " ※ 실제 프레임 수신 여부는 아래 명령으로 검증하세요:"
 echo "   timeout 15 v4l2-ctl -d /dev/video0 --set-fmt-video=width=1920,height=1536,pixelformat=UYVY --stream-mmap=4 --stream-count=60 --stream-to=/dev/null"
 ls -l /dev/video* 2>/dev/null || true
 echo "============================================================"
 
-if [ "$SUCCESS_COUNT" -eq 0 ]; then
+if [ "$SUCCESS_COUNT" -eq 0 ] || [ "$SUCCESS_COUNT" -lt "$REQUIRED_COUNT" ]; then
+    echo "[ERROR] 카메라 복구 불완전: 기준 ${REQUIRED_COUNT}개 → 설정 성공 ${SUCCESS_COUNT}개"
+    if [ "$EXPECTED_COUNT" -eq 0 ]; then
+        echo "        (리셋 전 노드가 없어 EXPECTED_CAMERAS=${EXPECTED_CAMERAS} 기준 — 카메라 수가 다르면 $DEFAULTS_FILE 에 설정)"
+    fi
     exit 1
 fi
 exit 0
