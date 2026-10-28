@@ -9,7 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import camera_recovery
+from . import camera_recovery, settings
 from .auto_recovery import AutoRecovery
 from .mjpeg import mjpeg_stream
 
@@ -47,6 +47,7 @@ def create_app(
 
     base_dir = Path(__file__).resolve().parent
     template_path = base_dir / "templates" / "dashboard.html"
+    settings_template_path = base_dir / "templates" / "settings.html"
     static_dir = base_dir / "static"
 
     app.mount("/static", _NoCacheStaticFiles(directory=str(static_dir)), name="static")
@@ -54,6 +55,10 @@ def create_app(
     @app.get("/")
     async def index():
         return FileResponse(str(template_path), headers={"Cache-Control": "no-cache"})
+
+    @app.get("/settings")
+    async def settings_page():
+        return FileResponse(str(settings_template_path), headers={"Cache-Control": "no-cache"})
 
     @app.get("/mjpeg/cam{cam_id}")
     async def mjpeg(cam_id: int):
@@ -156,6 +161,41 @@ def create_app(
         data = await run_in_threadpool(camera_recovery.get_status, recovery_cooldown)
         data["auto"] = auto_recovery.status()
         return JSONResponse(data)
+
+    # ---- 설정 화면 ----
+    settings.remember_startup(config)
+    apply_hook = getattr(state, "apply_live_setting", None) if state is not None else None
+
+    @app.get("/api/settings")
+    async def get_settings():
+        data = await run_in_threadpool(settings.get_settings, config)
+        data["server_started"] = server_started
+        return JSONResponse(data)
+
+    @app.post("/api/settings")
+    async def save_settings(payload: dict = Body(...)):
+        result = await run_in_threadpool(settings.save_changes, config, payload.get("changes"), apply_hook)
+        if state is not None and result.get("ok"):
+            try:
+                state._log_ops_event("settings_changed", changes=result["results"])
+            except Exception:
+                pass
+        return JSONResponse(result)
+
+    @app.post("/api/settings/apply-restart")
+    async def settings_apply_restart():
+        # 웹만 재시작하면 카메라를 다시 열 때 칩이 꼬인 적이 있어(2026-09) 칩 리셋 경로로 재시작
+        action = str(config.get("camera_auto_recovery_action", "reset-skip-relay"))
+        if action not in camera_recovery.RESET_ACTIONS:
+            action = "reset-skip-relay"
+        result = await run_in_threadpool(camera_recovery.start_action, action, 0)
+        if state is not None:
+            try:
+                state._log_ops_event("settings_apply_restart", action=action, ok=result.get("ok"),
+                                     error=result.get("error"))
+            except Exception:
+                pass
+        return JSONResponse(result)
 
     @app.post("/api/camera-recovery/{action}")
     async def camera_recovery_start(action: str):

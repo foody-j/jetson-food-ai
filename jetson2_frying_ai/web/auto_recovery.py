@@ -25,13 +25,9 @@ DAY_SEC = 86400
 class AutoRecovery:
     def __init__(self, cameras: dict, config: dict, log_event=None):
         self.cameras = cameras
+        self.config = config  # 켜기/끄기·기준·한도는 웹 설정 화면에서 바꾸면 바로 적용되도록 매번 읽음
         self.action = str(config.get("camera_auto_recovery_action", "reset-skip-relay"))
-        self.enabled = (bool(config.get("camera_auto_recovery_enabled", False))
-                        and self.action in camera_recovery.RESET_ACTIONS)
-        self.stall_sec = float(config.get("camera_auto_recovery_stall_sec", 60))
         self.grace_sec = float(config.get("camera_auto_recovery_grace_sec", 30))
-        self.max_per_hour = int(config.get("camera_auto_recovery_max_per_hour", 3))
-        self.max_per_day = int(config.get("camera_auto_recovery_max_per_day", 6))
         self.cooldown_sec = int(config.get("camera_recovery_cooldown_sec", 300))
         self.log_event = log_event
         self.started = time.time()
@@ -41,6 +37,23 @@ class AutoRecovery:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
+
+    @property
+    def enabled(self) -> bool:
+        return (bool(self.config.get("camera_auto_recovery_enabled", False))
+                and self.action in camera_recovery.RESET_ACTIONS)
+
+    @property
+    def stall_sec(self) -> float:
+        return float(self.config.get("camera_auto_recovery_stall_sec", 60))
+
+    @property
+    def max_per_hour(self) -> int:
+        return int(self.config.get("camera_auto_recovery_max_per_hour", 3))
+
+    @property
+    def max_per_day(self) -> int:
+        return int(self.config.get("camera_auto_recovery_max_per_day", 6))
 
     # ---- 실행 기록 (웹 재시작 후에도 유지) ----
     def _history(self, now: float) -> list:
@@ -153,10 +166,14 @@ class AutoRecovery:
                 print(f"[AutoRecovery] 점검 오류: {exc}")
 
     def start(self) -> None:
-        if not self.enabled or self._thread is not None:
+        # 꺼진 채 시작해도 스레드는 돌림 (설정 화면에서 켜면 바로 동작) — 판정은 check_once 에서 enabled 확인
+        if self.action not in camera_recovery.RESET_ACTIONS or self._thread is not None:
             return
-        print(f"[AutoRecovery] 켜짐: 프레임 {self.stall_sec:.0f}초 없으면 {self.action} "
-              f"(1시간 {self.max_per_hour}회, 24시간 {self.max_per_day}회 한도)")
+        if not self.enabled:
+            print("[AutoRecovery] 꺼짐 (설정 화면에서 켤 수 있음)")
+        else:
+            print(f"[AutoRecovery] 켜짐: 프레임 {self.stall_sec:.0f}초 없으면 {self.action} "
+                  f"(1시간 {self.max_per_hour}회, 24시간 {self.max_per_day}회 한도)")
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 

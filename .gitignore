@@ -49,3 +49,6 @@ SG4A_NONX_G2Y_A1_ORIN_NANO_YUV_JP6.2_L4TR36.4.3/dtb/**/*.dtbo
 # AI Model files
 *.pt
 !yolo*.pt
+
+# 웹 설정 화면에서 바꾼 장비별 설정 (장비마다 다름, git pull 과 충돌 방지)
+jetson2_frying_ai/config_jetson2_web.local.json*

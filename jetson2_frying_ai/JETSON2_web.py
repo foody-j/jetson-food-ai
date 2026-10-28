@@ -75,9 +75,11 @@ except Exception:
 
 
 def load_config(config_path: str = "config_jetson2_web.json") -> dict:
-    config_full_path = os.path.join(SCRIPT_DIR, config_path)
-    with open(config_full_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    # 기본 설정 위에 웹 설정 화면에서 바꾼 장비별 값(config_jetson2_web.local.json)을 덮어 읽음
+    from pathlib import Path
+    from web.settings import load_merged
+    base_path = Path(SCRIPT_DIR) / config_path
+    return load_merged(base_path, base_path.with_name(base_path.stem + ".local.json"))
 
 
 def _append_app_log_entry(entry: dict) -> None:
@@ -1421,6 +1423,8 @@ class HumanSafetyWorker(threading.Thread):
                         blocked_now = False
                 gate = "BLOCKED_HUMAN" if blocked_now else "SAFE"
 
+            if not self.enabled:
+                continue  # 추론 도중 꺼졌으면 결과를 쓰지 않음 (set_enabled 가 안전으로 초기화함)
             with self.result_lock:
                 self.latest_result.update(
                     {
@@ -1456,6 +1460,14 @@ class HumanSafetyWorker(threading.Thread):
 
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = enabled
+        if not enabled:
+            # 꺼질 때 마지막 판정이 '차단'으로 남으면 투입이 계속 막히므로 안전으로 초기화
+            with self.result_lock:
+                self.latest_result.update(
+                    {"gate": "SAFE", "human_detected": False, "blocked": False, "reason": "disabled"}
+                )
+            self._last_gate = "SAFE"
+            self._detect_streak = 0
 
     def stop(self) -> None:
         self.running = False
@@ -1841,9 +1853,10 @@ class Jetson2Web:
         self.pot1_food_type = food_type
         self.pot1_status = "COOKING"
         self._cancel_discharge_idle_timer(1)
-        if not self.frying_running:
+        # 설정 화면에서 끈 AI 는 조리가 시작돼도 다시 켜지 않음
+        if not self.frying_running and self.config.get("frying_enabled", True):
             self._set_frying_enabled(True)
-        if not self.observe_running:
+        if not self.observe_running and self.config.get("observe_enabled", True):
             self._set_observe_enabled(True)
 
         if self.pot1_timeout_timer:
@@ -1880,9 +1893,10 @@ class Jetson2Web:
         self.pot2_food_type = food_type
         self.pot2_status = "COOKING"
         self._cancel_discharge_idle_timer(2)
-        if not self.frying_running:
+        # 설정 화면에서 끈 AI 는 조리가 시작돼도 다시 켜지 않음
+        if not self.frying_running and self.config.get("frying_enabled", True):
             self._set_frying_enabled(True)
-        if not self.observe_running:
+        if not self.observe_running and self.config.get("observe_enabled", True):
             self._set_observe_enabled(True)
 
         if self.pot2_timeout_timer:
@@ -2330,6 +2344,33 @@ class Jetson2Web:
         self.observe_running = enabled
         for worker in self.observe_workers.values():
             worker.set_enabled(enabled)
+
+    def apply_live_setting(self, key: str, value) -> bool:
+        """웹 설정 화면에서 바꾼 스위치를 실행 중에 반영. 반영했으면 True, 재시작이 필요하면 False."""
+        if key == "frying_enabled":
+            if not value:
+                self._set_frying_enabled(False)
+                return True
+            return bool(self.frying_workers)  # 다음 조리 시작 때 다시 켜짐
+        if key == "observe_enabled":
+            if not value:
+                self._set_observe_enabled(False)
+                return True
+            if not self.observe_workers:
+                return False
+            if self.config.get("observe_autostart", False) or "COOKING" in (self.pot1_status, self.pot2_status):
+                self._set_observe_enabled(True)
+            return True
+        if key == "human_safety_enabled":
+            if not self.human_workers:
+                return not value  # 꺼진 채 시작했으면 켜기는 재시작 필요
+            for worker in self.human_workers.values():
+                worker.set_enabled(bool(value))
+            return True
+        if key == "overlay_enabled":
+            self.set_overlay_enabled(bool(value))
+            return True
+        return False
 
     def set_overlay_enabled(self, enabled: bool) -> None:
         self.overlay_enabled = enabled

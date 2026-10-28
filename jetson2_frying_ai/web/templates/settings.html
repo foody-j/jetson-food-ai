@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <title>Jetson2 설정</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body { padding-bottom: 80px; }
+        .back-link { text-decoration: none; color: var(--ink); }
+        .card-help { color: var(--gray-text); font-size: 13px; margin: -4px 0 10px; }
+        .row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 4px 12px;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--neutral-surface);
+        }
+        .row:last-child { border-bottom: none; }
+        .row.sub .row-label { padding-left: 18px; font-weight: 500; }
+        .row.changed { background: var(--lavender-surface); margin: 0 -8px; padding: 10px 8px; border-radius: 6px; }
+        .row-label { font-size: 15px; font-weight: 600; }
+        .row-key { font-family: var(--mono); font-size: 13px; font-weight: 500; word-break: break-all; }
+        .row-help { grid-column: 1; color: var(--gray-text); font-size: 12px; }
+        .row-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--gray-text); }
+        .row-control { grid-row: 1 / span 2; grid-column: 2; display: flex; align-items: center; gap: 6px; }
+        .badge { padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid var(--divider); }
+        .badge-live { color: #2c7a4b; border-color: #a9dcbc; background: #eef8f2; }
+        .badge-restart { color: #a35f12; border-color: #f3c995; background: #fdf3e7; }
+        .badge-custom { color: var(--purple); border-color: var(--lavender-strong); background: var(--lavender-surface); }
+        .link-btn { background: none; border: none; color: var(--purple); font-size: 12px; cursor: pointer; padding: 0; font-family: inherit; text-decoration: underline; }
+        .switch {
+            position: relative; width: 58px; height: 32px; border-radius: 999px; border: none;
+            background: var(--divider); cursor: pointer; flex-shrink: 0; transition: background 0.15s;
+        }
+        .switch::after {
+            content: ""; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px;
+            border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25); transition: left 0.15s;
+        }
+        .switch[aria-checked="true"] { background: var(--purple); }
+        .switch[aria-checked="true"]::after { left: 29px; }
+        .switch-text { width: 30px; font-size: 13px; font-weight: 600; text-align: right; }
+        input.num, input.text { width: 130px; padding: 7px 8px; font-size: 15px; border: 1px solid var(--divider); border-radius: 6px; font-family: inherit; }
+        input.text { width: 200px; }
+        textarea.json { width: min(320px, 60vw); min-height: 54px; font-family: var(--mono); font-size: 12px; border: 1px solid var(--divider); border-radius: 6px; padding: 6px; }
+        .err { grid-column: 1 / -1; color: var(--coral-dark); font-size: 12px; font-weight: 600; }
+        details.group { border: 1px solid var(--divider); border-radius: 8px; margin-bottom: 8px; padding: 0 12px; }
+        details.group summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
+        .notice {
+            margin: 12px 20px 0; padding: 10px 14px; border-radius: 8px; font-size: 14px;
+            display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+        }
+        .notice-restart { background: #fdf3e7; border: 1px solid #f3c995; }
+        .notice-ok { background: #eef8f2; border: 1px solid #a9dcbc; }
+        .notice-error { background: #fdeceb; border: 1px solid #f1b3ad; }
+        .savebar {
+            position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 20px;
+            background: var(--canvas); border-top: 1px solid var(--divider);
+            display: flex; gap: 10px; align-items: center; justify-content: flex-end;
+            box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+        }
+        .savebar-text { margin-right: auto; font-weight: 600; }
+        .btn-primary { background: var(--purple); color: #fff; border-color: var(--purple); }
+        .btn-primary:disabled { opacity: 0.4; cursor: default; }
+        .btn-big { padding: 9px 16px; font-size: 14px; }
+        dialog { border: 1px solid var(--divider); border-radius: 10px; padding: 18px 20px; width: min(560px, 92vw); }
+        dialog::backdrop { background: rgba(23,23,23,0.35); }
+        .diff-list { margin: 8px 0 14px; padding: 0; list-style: none; max-height: 50vh; overflow: auto; }
+        .diff-list li { padding: 6px 0; border-bottom: 1px solid var(--neutral-surface); font-size: 14px; }
+        .diff-val { font-family: var(--mono); font-size: 13px; }
+        .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <div class="title-block">
+            <span class="title-mark"></span>
+            <h1>Jetson #2 설정</h1>
+        </div>
+        <div class="chips">
+            <a class="chip back-link" href="/">← 대시보드</a>
+        </div>
+    </header>
+
+    <div class="notice notice-restart" id="restart-notice" hidden>
+        <span id="restart-text">-</span>
+        <button class="btn btn-primary" id="restart-btn" onclick="applyRestart()">지금 적용 (칩 리셋 + 재시작, 약 1분)</button>
+    </div>
+    <div class="notice" id="result-notice" hidden></div>
+
+    <section class="panel">
+        <div class="section-label">AI 스위치</div>
+        <p class="card-help"><span class="badge badge-live">즉시</span> 저장하면 바로 적용 · <span class="badge badge-restart">재시작 후</span> 저장 뒤 재시작해야 적용</p>
+        <div id="switches">불러오는 중...</div>
+    </section>
+
+    <section class="panel">
+        <div class="section-label">주요 설정</div>
+        <div id="important"></div>
+    </section>
+
+    <section class="panel">
+        <div class="section-label">고급 (전체 항목)</div>
+        <p class="card-help">설정 파일의 원래 이름 그대로입니다. 잘 모르는 항목은 바꾸지 마세요.</p>
+        <div id="groups"></div>
+    </section>
+
+    <div class="savebar">
+        <span class="savebar-text" id="savebar-text">변경 없음</span>
+        <button class="btn btn-big" id="cancel-btn" onclick="cancelChanges()" disabled>취소</button>
+        <button class="btn btn-big btn-primary" id="save-btn" onclick="openConfirm()" disabled>저장</button>
+    </div>
+
+    <dialog id="confirm-dialog">
+        <strong>이렇게 바꿀까요?</strong>
+        <ul class="diff-list" id="diff-list"></ul>
+        <div class="dialog-actions">
+            <button class="btn btn-big" onclick="document.getElementById('confirm-dialog').close()">돌아가기</button>
+            <button class="btn btn-big btn-primary" onclick="saveChanges()">저장</button>
+        </div>
+    </dialog>
+
+    <script>
+        const SUB_SWITCHES = { frying_left_enabled: 1, frying_right_enabled: 1, observe_left_enabled: 1, observe_right_enabled: 1 };
+        let items = {};        // key → 서버에서 받은 항목
+        let changes = {};      // key → 바꿀 값 (저장 전)
+        let fieldErrors = {};  // key → 오류 메시지
+        let serverStarted = null;
+
+        function fmt(v) {
+            if (typeof v === 'boolean') return v ? 'ON' : 'OFF';
+            if (typeof v === 'object') return JSON.stringify(v);
+            return String(v);
+        }
+        function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+        function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+        function current(key) { return key in changes ? changes[key] : items[key].value; }
+
+        function controlHtml(it) {
+            const v = current(it.key);
+            const k = esc(it.key);
+            if (it.type === 'bool') {
+                return `<span class="switch-text">${v ? 'ON' : 'OFF'}</span>
+                    <button class="switch" role="switch" aria-checked="${v}" aria-label="${esc(it.label)}"
+                        onclick="setValue('${k}', ${!v})"></button>`;
+            }
+            if (it.type === 'int' || it.type === 'float') {
+                const attrs = [
+                    it.min !== null ? `min="${it.min}"` : '', it.max !== null ? `max="${it.max}"` : '',
+                    `step="${it.step !== null ? it.step : (it.type === 'int' ? 1 : 'any')}"`,
+                ].join(' ');
+                return `<input class="num" type="number" inputmode="decimal" ${attrs} value="${esc(v)}"
+                    onchange="setNumber('${k}', this.value)">`;
+            }
+            if (it.type === 'str') {
+                return `<input class="text" type="text" value="${esc(v)}" onchange="setValue('${k}', this.value)">`;
+            }
+            return `<textarea class="json" onchange="setJson('${k}', this.value)">${esc(JSON.stringify(v))}</textarea>`;
+        }
+
+        function rowHtml(it, mode) {
+            const changed = it.key in changes;
+            const label = mode === 'raw' ? `<div class="row-key">${esc(it.key)}</div>` : `<div class="row-label">${esc(it.label)}</div>`;
+            const help = mode === 'raw' ? '' : `<div class="row-help">${esc(it.help)}</div>`;
+            const badge = it.apply === 'live' ? '<span class="badge badge-live">즉시</span>' : '<span class="badge badge-restart">재시작 후</span>';
+            const custom = it.overridden && !changed
+                ? `<span class="badge badge-custom">이 장비만 변경됨</span> 기본값 ${esc(fmt(it.default))}
+                   <button class="link-btn" onclick="setValue('${esc(it.key)}', items['${esc(it.key)}'].default)">기본값으로</button>`
+                : '';
+            const pending = changed ? `<span>저장 전: ${esc(fmt(it.value))} → <b>${esc(fmt(changes[it.key]))}</b></span>` : '';
+            const err = fieldErrors[it.key] ? `<div class="err">${esc(fieldErrors[it.key])}</div>` : '';
+            const sub = mode === 'switch' && SUB_SWITCHES[it.key] ? ' sub' : '';
+            return `<div class="row${sub}${changed ? ' changed' : ''}">
+                ${label}${help}
+                <div class="row-control">${controlHtml(it)}</div>
+                <div class="row-meta">${badge}${custom}${pending}</div>${err}
+            </div>`;
+        }
+
+        let lastData = null;
+        function render() {
+            const data = lastData;
+            if (!data) return;
+            document.getElementById('switches').innerHTML = data.switches.map(it => rowHtml(it, 'switch')).join('');
+            document.getElementById('important').innerHTML = data.important.map(it => rowHtml(it, 'important')).join('');
+            const groupsEl = document.getElementById('groups');
+            const openGroups = new Set([...groupsEl.querySelectorAll('details[open]')].map(d => d.dataset.title));
+            groupsEl.innerHTML = data.groups.map(g => {
+                const hasChange = g.items.some(it => it.key in changes || fieldErrors[it.key]);
+                const open = openGroups.has(g.title) || hasChange ? ' open' : '';
+                return `<details class="group" data-title="${esc(g.title)}"${open}>
+                    <summary>${esc(g.title)} (${g.items.length})</summary>
+                    ${g.items.map(it => rowHtml(it, 'raw')).join('')}
+                </details>`;
+            }).join('');
+
+            const n = Object.keys(changes).length;
+            document.getElementById('savebar-text').textContent = n ? `변경 ${n}개 (저장 전)` : '변경 없음';
+            document.getElementById('save-btn').disabled = n === 0;
+            document.getElementById('cancel-btn').disabled = n === 0;
+
+            const pending = data.pending_restart || [];
+            document.getElementById('restart-notice').hidden = pending.length === 0;
+            document.getElementById('restart-text').textContent =
+                `재시작해야 적용되는 변경 ${pending.length}개: ${pending.map(k => items[k] ? items[k].label : k).join(', ')}`;
+        }
+
+        function setValue(key, value) {
+            delete fieldErrors[key];
+            if (same(value, items[key].value)) delete changes[key];
+            else changes[key] = value;
+            render();
+        }
+        function setNumber(key, raw) {
+            const it = items[key];
+            const num = Number(raw);
+            if (raw === '' || !Number.isFinite(num)) { fieldErrors[key] = '숫자를 입력하세요'; render(); return; }
+            if (it.type === 'int' && !Number.isInteger(num)) { fieldErrors[key] = '정수를 입력하세요'; render(); return; }
+            if (it.min !== null && num < it.min) { fieldErrors[key] = `${it.min} 이상이어야 합니다`; render(); return; }
+            if (it.max !== null && num > it.max) { fieldErrors[key] = `${it.max} 이하여야 합니다`; render(); return; }
+            setValue(key, num);
+        }
+        function setJson(key, raw) {
+            try { setValue(key, JSON.parse(raw)); }
+            catch (e) { fieldErrors[key] = 'JSON 형식이 아닙니다'; render(); }
+        }
+        function cancelChanges() { changes = {}; fieldErrors = {}; render(); }
+
+        function openConfirm() {
+            if (Object.keys(fieldErrors).length) { showResult('빨간 오류부터 고쳐 주세요', 'error'); return; }
+            document.getElementById('diff-list').innerHTML = Object.entries(changes).map(([k, v]) => {
+                const it = items[k];
+                const badge = it.apply === 'live' ? '<span class="badge badge-live">즉시</span>' : '<span class="badge badge-restart">재시작 후</span>';
+                return `<li>${badge} ${esc(it.label)}<br><span class="diff-val">${esc(fmt(it.value))} → <b>${esc(fmt(v))}</b></span></li>`;
+            }).join('');
+            document.getElementById('confirm-dialog').showModal();
+        }
+
+        function showResult(text, level) {
+            const el = document.getElementById('result-notice');
+            el.className = `notice notice-${level}`;
+            el.textContent = text;
+            el.hidden = false;
+        }
+
+        async function saveChanges() {
+            document.getElementById('confirm-dialog').close();
+            let data;
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ changes }),
+                });
+                data = await res.json();
+            } catch (e) {
+                showResult('저장 요청 실패 — 네트워크/웹 서버 확인', 'error');
+                return;
+            }
+            if (!data.ok) {
+                fieldErrors = data.errors || {};
+                showResult('저장 안 됨: 표시된 항목을 확인하세요', 'error');
+                render();
+                return;
+            }
+            const live = data.results.filter(r => r.apply === 'live').length;
+            const restart = data.results.length - live;
+            showResult(`저장됨 — 즉시 적용 ${live}개` + (restart ? `, 재시작 후 적용 ${restart}개 (위 '지금 적용' 버튼)` : ''), 'ok');
+            changes = {};
+            fieldErrors = {};
+            await load();
+        }
+
+        async function applyRestart() {
+            if (!confirm('칩 리셋 후 웹을 재시작합니다. 튀김/바켓 AI가 약 1분 멈춥니다. 진행할까요?')) return;
+            let data;
+            try {
+                const res = await fetch('/api/settings/apply-restart', { method: 'POST' });
+                data = await res.json();
+            } catch (e) {
+                showResult('재시작 요청 실패', 'error');
+                return;
+            }
+            if (!data.ok) {
+                showResult(`재시작 시작 실패: ${data.message || data.error}`, 'error');
+                return;
+            }
+            document.getElementById('restart-btn').disabled = true;
+            showResult('재시작 중... 웹이 다시 뜨면 자동으로 새로고침합니다 (약 1~2분)', 'restart');
+            waitForRestart(Date.now());
+        }
+
+        async function waitForRestart(since) {
+            try {
+                const res = await fetch('/api/settings');
+                const data = await res.json();
+                if (data.server_started !== serverStarted) { location.reload(); return; }
+            } catch (e) { /* 재시작 중 */ }
+            if (Date.now() - since > 600000) {
+                showResult('10분이 지나도 웹이 돌아오지 않음 — SSH로 jetson2-web 상태 확인', 'error');
+                return;
+            }
+            setTimeout(() => waitForRestart(since), 3000);
+        }
+
+        async function load() {
+            let data;
+            try {
+                const res = await fetch('/api/settings');
+                data = await res.json();
+            } catch (e) {
+                document.getElementById('switches').textContent = '설정을 불러오지 못했습니다';
+                return;
+            }
+            serverStarted = data.server_started;
+            items = {};
+            for (const it of [...data.switches, ...data.important, ...data.groups.flatMap(g => g.items)]) items[it.key] = it;
+            lastData = data;
+            render();
+        }
+
+        load();
+    </script>
+</body>
+</html>
