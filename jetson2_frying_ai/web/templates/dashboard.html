@@ -60,7 +60,7 @@
         <div class="section-label">제어</div>
         <div class="control-panel">
             <div class="control-group control-group-key">
-                <div class="control-title">카메라 복구</div>
+                <div class="control-title">카메라 복구 <span id="auto-recovery-status" class="recovery-status"></span></div>
                 <div class="control-buttons">
                     <button class="btn" onclick="recoveryStart('relay-status')">릴레이 상태</button>
                     <button class="btn btn-danger" onclick="recoveryStart('reset')">칩 리셋</button>
@@ -490,6 +490,7 @@
                 reconnectCameras();
                 refreshRecovery();
             }
+            renderAutoRecovery(data.auto_recovery);
 
             try {
                 for (let i = 0; i < 4; i++) {
@@ -626,6 +627,29 @@
                 recoveryTimer = null;
                 refreshRecovery();
             }, ms);
+        }
+
+        let autoTriggerSeen = null;
+        function renderAutoRecovery(ar) {
+            const el = document.getElementById('auto-recovery-status');
+            if (!ar) {
+                el.textContent = '';
+                return;
+            }
+            if (!ar.enabled) {
+                el.textContent = '· 자동 복구 꺼짐';
+                el.className = 'recovery-status';
+            } else {
+                el.textContent = ar.limited
+                    ? `· 자동 복구 멈춤: ${ar.message}`
+                    : `· 자동 복구 켜짐 (1시간 ${ar.recent_hour}/${ar.max_per_hour}회)`;
+                el.className = `recovery-status ${ar.limited ? 'recovery-error' : ''}`;
+            }
+            // 자동 리셋이 새로 시작됐으면 진행 상황을 따라감 (다른 화면에서 누른 버튼과 같은 방식)
+            if (autoTriggerSeen !== null && ar.last_trigger > autoTriggerSeen) {
+                refreshRecovery();
+            }
+            autoTriggerSeen = ar.last_trigger;
         }
 
         function setRecoveryStatus(text, level) {

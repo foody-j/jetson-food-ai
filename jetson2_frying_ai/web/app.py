@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import camera_recovery
+from .auto_recovery import AutoRecovery
 from .mjpeg import mjpeg_stream
 
 
@@ -38,6 +39,11 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Jetson2 Dashboard", version="1.0")
     server_started = time.time()  # 대시보드가 웹 재시작을 감지해 카메라 스트림을 다시 연결하는 기준
+    # 카메라 멈춤 자동 복구 (camera_auto_recovery_* 설정, 기본 꺼짐)
+    auto_recovery = AutoRecovery(
+        cameras, config, log_event=getattr(state, "_log_app_event", None) if state is not None else None
+    )
+    auto_recovery.start()
 
     base_dir = Path(__file__).resolve().parent
     template_path = base_dir / "templates" / "dashboard.html"
@@ -134,6 +140,7 @@ def create_app(
                 "frying": frying_status,
                 "observe": observe_status,
                 "mqtt": {"connected": mqtt_connected},
+                "auto_recovery": auto_recovery.status(),
                 **extra,
             }
         )
@@ -146,7 +153,9 @@ def create_app(
 
     @app.get("/api/camera-recovery/status")
     async def camera_recovery_status():
-        return JSONResponse(await run_in_threadpool(camera_recovery.get_status, recovery_cooldown))
+        data = await run_in_threadpool(camera_recovery.get_status, recovery_cooldown)
+        data["auto"] = auto_recovery.status()
+        return JSONResponse(data)
 
     @app.post("/api/camera-recovery/{action}")
     async def camera_recovery_start(action: str):

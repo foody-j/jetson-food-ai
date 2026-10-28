@@ -5,6 +5,8 @@
 #   /etc/systemd/system/deser-control@.service   root로 deser_control.sh 실행
 #   /etc/sudoers.d/deser-control                 웹 사용자에게 아래 3개 명령만 비밀번호 없이 허용
 #       systemctl start --no-block deser-control@{reset,reset-skip-relay,relay-status}.service
+#   /etc/systemd/system/<jetsonN>-web-restart.service.d/deser-reset.conf
+#       새벽 웹 재시작 타이머가 있으면 웹 재시작 대신 칩 리셋(리셋 → 드라이버 재로드 → 웹 시작)으로 교체
 #
 # 사용법 (웹 서비스를 실행하는 사용자 계정으로):
 #   cd ~/jetson-food-ai && ./install_deser_control.sh
@@ -20,9 +22,14 @@ UNIT_FILE="/etc/systemd/system/deser-control@.service"
 SUDOERS_FILE="/etc/sudoers.d/deser-control"
 SYSTEMCTL="/usr/bin/systemctl"  # web/camera_recovery.py 와 같은 경로여야 sudoers 가 일치함
 ACTIONS=(reset reset-skip-relay relay-status)
+RESTART_UNITS=(jetson1-web-restart.service jetson2-web-restart.service)
+DROPIN_NAME="deser-reset.conf"
 
 if [ "${1:-}" = "--uninstall" ]; then
     sudo rm -f "$UNIT_FILE" "$SUDOERS_FILE"
+    for unit in "${RESTART_UNITS[@]}"; do
+        sudo rm -f "/etc/systemd/system/$unit.d/$DROPIN_NAME"
+    done
     sudo systemctl daemon-reload
     echo "제거 완료"
     exit 0
@@ -89,10 +96,28 @@ fi
 sudo install -m 440 -o root -g root "$TMP_SUDOERS" "$SUDOERS_FILE"
 rm -f "$TMP_SUDOERS"
 
-echo "[3] systemd 재로드"
+echo "[3] 새벽 재시작 타이머 → 칩 리셋으로 교체"
+# 웹만 재시작하면 카메라를 다시 열 때 칩이 꼬여 아침까지 멈춘 적이 있음 (울산 2026-09-15~18, 매일 02:02 시작)
+FOUND_RESTART=false
+for unit in "${RESTART_UNITS[@]}"; do
+    [ -f "/etc/systemd/system/$unit" ] || continue
+    FOUND_RESTART=true
+    sudo mkdir -p "/etc/systemd/system/$unit.d"
+    sudo tee "/etc/systemd/system/$unit.d/$DROPIN_NAME" > /dev/null <<EOF
+# install_deser_control.sh 가 작성 — 웹 재시작 대신 칩 리셋 (중지했던 웹은 리셋 스크립트가 다시 시작)
+[Service]
+ExecStart=
+ExecStart=$SYSTEMCTL start deser-control@reset-skip-relay.service
+TimeoutStartSec=420
+EOF
+    echo "  $unit → deser-control@reset-skip-relay"
+done
+[ "$FOUND_RESTART" = true ] || echo "  (새벽 재시작 타이머 없음 — 건너뜀)"
+
+echo "[4] systemd 재로드"
 sudo systemctl daemon-reload
 
-echo "[4] 비밀번호 없이 실행되는지 확인 (릴레이 상태 조회 — 전원 변경 없음)"
+echo "[5] 비밀번호 없이 실행되는지 확인 (릴레이 상태 조회 — 전원 변경 없음)"
 sudo -k  # 캐시된 sudo 인증을 지워서 NOPASSWD 규칙만으로 실행되는지 확인
 STATUS_LOG="/run/deser-control/relay-status.log"
 T0="$(date +%s)"

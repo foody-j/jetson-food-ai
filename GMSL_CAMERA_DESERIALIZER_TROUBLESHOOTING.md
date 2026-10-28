@@ -331,6 +331,30 @@ sudo env PYTHONPATH=$HOME/.local/lib/python3.10/site-packages ./reset_deser_and_
 * 장비별 설정: 배선/포트/버스가 기본값(nc, CH340 by-id, I2C bus 9)과 다르거나 카메라가 4대가 아니면 `/etc/default/deser-control`에 `WIRING=no`, `RELAY_PORT=...`, `I2C_BUS=...`, `EXPECTED_CAMERAS=3` 형식으로 적어 둠 (터미널 수동 실행도 같은 파일을 읽음).
 * 진행 로그: 대시보드 `Log` 버튼(카메라 복구 줄 바로 아래), 또는 `/run/deser-control/<동작>.log`. 상태 파일: `state.json`(마지막 작업), `last_reset.json`(마지막 성공 리셋, 쿨다운 기준).
 
+#### 발생 기록과 자동 복구 (2026-10-28 추가, 울산 `app_logs` 분석)
+* 멈춤은 **스스로 풀리지 않음** — 기록된 모든 건이 2~16시간 지속되다가 사람이 끄거나 칩 리셋할 때 끝남.
+  | 날짜 | 시작 | 카메라 | 끝 |
+  |---|---|---|---|
+  | 2026-09-14 | (전날부터) | CAM1 | 18:20 |
+  | 2026-09-15~18 | **매일 02:02~02:03** | CAM1~3 | 06:04 / 09:15 / 11:23 / 12:52 (재시작할 때까지) |
+  | 2026-10-27 | 12:46 | CAM1~3 | 15:19 칩 리셋 |
+  | 2026-10-28 | 10:33 | CAM1만 | 18:32 칩 리셋 → 정상 |
+* 9월 패턴은 **새벽 2시 웹 재시작 타이머 직후** 시작 — 웹만 재시작하면서 카메라를 다시 열 때 칩이 꼬인 것으로 봄 (9/19 이후·10/28 02:00 재시작에서는 재현 안 됨).
+* 10/28 멈춤 중 `same_count=0` (프레임 자체가 안 들어옴), `dmesg`에 `tegra-capture-vi: corr_err: discarding frame` 반복. 리셋 후 카메라는 정상이지만 `corr_err`는 가끔 계속 발생(어느 채널인지는 표시 안 됨) → 링크 신호 품질 계속 관찰.
+* 울산 젯슨은 저널이 메모리에만 저장(`/var/log/journal` 없음)되어 지난 커널 로그가 남지 않음. 영구 저장: `sudo mkdir -p /var/log/journal && sudo systemctl restart systemd-journald`.
+* 멈춤 기록 확인 명령 (`jetson2_frying_ai/app_logs`에서):
+  ```bash
+  grep -h 'Frame stalled ([5-9]\.' app_*.jsonl \
+    | sed -E 's/^\{"timestamp": "([0-9-]+ [0-9:]{5}).*\[CAM([0-9])\].*/\1 CAM\2/' | uniq | tail -40
+  ```
+* **자동 복구** (`web/auto_recovery.py`, `config_jetson2_web.json`의 `camera_auto_recovery_*`):
+  * 카메라 1대라도 내용이 바뀐 프레임이 `camera_auto_recovery_stall_sec`(60초) 넘게 없고, 같은 프레임도 초당 5장 미만이면 `camera_auto_recovery_action`(`reset-skip-relay`) 자동 실행. 불 꺼진 밤처럼 화면만 안 변하고 프레임은 들어오면 실행 안 함.
+  * 웹 시작 후 30초 유예, 시작 재시도에 실패한 카메라(`시작 실패`)는 대상 아님.
+  * 한도: 1시간 3회, 24시간 6회 (`~/.cache/jetson2_auto_recovery.json`에 기록, 웹 재시작 후에도 유지). 한도에 걸리면 자동 실행을 멈추고 대시보드에 `자동 복구 멈춤 … 수동 점검 필요` → 케이블·커넥터·카메라 점검.
+  * 성공한 리셋 후 쿨다운(300초) 동안은 기다렸다가 다시 시도. 대시보드 `카메라 복구` 제목 옆에 상태 표시, 자동 리셋이 시작되면 진행 상황을 따라감.
+  * 끄기: `"camera_auto_recovery_enabled": false`.
+* **새벽 2시 타이머**: `install_deser_control.sh`가 `jetson2-web-restart.service`(또는 `jetson1-web-restart`)에 drop-in(`…service.d/deser-reset.conf`)을 넣어 웹 재시작 대신 `deser-control@reset-skip-relay`(웹 중지 → 칩 리셋 → 드라이버 재로드 → 웹 시작) 실행. 확인: `systemctl cat jetson2-web-restart.service`. 되돌리기: drop-in 삭제 후 `sudo systemctl daemon-reload`.
+
 #### 미확정 사항
 * 이번에 릴레이가 실제로 12V를 끊었는지 모름(칩은 12V 차단 중에도 응답하므로 출력으로 구분 불가). 따라서 "**칩 리셋만으로 stall 복구 가능**"은 유력하지만 확정 아님.
 * 확정 방법: (1) 현장에서 실행 중 릴레이 딸깍 소리/보드 LED 소등 확인, (2) 12V 차단 중 I2C bus 9에서 시리얼라이저(`0x44`)·카메라(`0x1a~0x1d`) 소멸 여부 확인, (3) 다음 stall 때 릴레이 없이 RESET_ALL만 수행해 비교.
