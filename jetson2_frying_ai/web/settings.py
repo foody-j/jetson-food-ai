@@ -18,7 +18,7 @@ LOCAL_FILE = BASE_DIR / "config_jetson2_web.local.json"
 
 # 워커 루프/화면 갱신마다 config 를 다시 읽는 항목 → 저장 즉시 적용
 LIVE_KEYS = {
-    "camera_stale_log_sec", "frying_log_interval_sec",
+    "device_label", "camera_stale_log_sec", "frying_log_interval_sec",
     "observe_img_size_seg", "observe_img_size_cls", "observe_conf_seg", "observe_inner_margin",
     "observe_bbox_pad", "observe_filled_prob_min", "observe_vote_min_samples",
     "observe_cam3_right_min_ratio", "observe_투입_temp_threshold",
@@ -47,6 +47,7 @@ SWITCHES = [
 
 # 주요 설정 (key, 이름, 설명, 최소, 최대, 단계)
 IMPORTANT = [
+    ("device_label", "장비 이름표", "헤더 제목 옆에 작게 표시 (예: 울산 #2). 비우면 숨김 — 화면 새로고침 시 반영", None, None, None),
     ("observe_conf_seg", "바켓 감지 신뢰도 기준", "낮추면 더 잘 잡지만 오탐 증가", 0.05, 0.95, 0.05),
     ("observe_filled_prob_min", "바켓 '채워짐' 판정 확률", "이 확률 이상이어야 채워짐으로 판정", 0.5, 1.0, 0.01),
     ("observe_vote_min_samples", "바켓 판정 최소 표본 수", "판정 전에 모을 프레임 수", 1, 20, 1),

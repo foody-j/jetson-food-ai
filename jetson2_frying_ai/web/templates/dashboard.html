@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <title>Jetson2 Dashboard</title>
+    <title>튀김 AI 모니터</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="/static/style.css">
@@ -10,7 +10,8 @@
     <header class="topbar">
         <div class="title-block">
             <span class="title-mark"></span>
-            <h1>Jetson #2 튀김 · 바켓 모니터링</h1>
+            <h1>튀김 AI 모니터</h1>
+            <span class="device-label" id="device-label" hidden></span>
         </div>
         <div class="chips">
             <span class="chip" id="chip-mqtt">MQTT -</span>
@@ -460,12 +461,22 @@
             mqttChip.className = 'chip';
         }
 
+        function showDeviceLabel(label) {
+            // 장비 이름표 (설정 화면 '장비 이름표', 예: 울산 #2) — 비어 있으면 숨김
+            const el = document.getElementById('device-label');
+            const text = String(label || '').trim();
+            el.textContent = text;
+            el.hidden = !text;
+            document.title = text ? `튀김 AI 모니터 · ${text}` : '튀김 AI 모니터';
+        }
+
         async function loadDashboardConfig() {
             try {
                 const res = await fetch('/api/config');
                 const cfg = await res.json();
                 const sec = Number(cfg.camera_stall_alert_sec);
                 if (sec > 0) stallAlertSec = sec;
+                showDeviceLabel(cfg.device_label);
             } catch (e) {
                 // 기본값 유지
             }

@@ -66,6 +66,15 @@ body {
     border-radius: 2px;
 }
 
+.device-label {
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: var(--lavender-surface);
+    color: var(--purple);
+    font-size: 13px;
+    font-weight: 600;
+}
+
 .topbar h1 {
     margin: 0;
     font-size: 22px;
