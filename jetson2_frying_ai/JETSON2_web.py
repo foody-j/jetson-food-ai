@@ -636,10 +636,13 @@ class FryingAIWorker(threading.Thread):
         self._last_frame = None
         self._last_mask = None
         self._last_metrics = {}
+        self.event_callback = None  # (event, **data) → ops_logs 기록 (JetsonState 가 연결)
+        self._completion_logged = False
 
     def start_session(self, food_type: str, target_time: int) -> None:
         session_id = f"pot{self.pot_id}_{int(time.time())}"
         self.tracker.start_session(session_id=session_id, food_type=food_type, target_time=target_time)
+        self._completion_logged = False
         with self.result_lock:
             self.latest_result["status"] = "COOKING"
             self.latest_result["food_type"] = food_type
@@ -690,6 +693,7 @@ class FryingAIWorker(threading.Thread):
                         f"block_reason={tracker_result.get('block_reason', '') or '-'}"
                     )
                     self._last_log_ts = now
+                self._emit_tracker_events(seg_result, tracker_result)
 
                 with self.result_lock:
                     self.latest_result.update(
@@ -710,6 +714,33 @@ class FryingAIWorker(threading.Thread):
             except Exception as e:
                 print(f"[Frying AI] pot{self.pot_id} error: {e}")
                 traceback.print_exc()
+
+    def _emit_tracker_events(self, seg_result, tracker_result: dict) -> None:
+        # 탈탈·완료 판정을 그때그때 ops_logs 에 남김 (세션 요약 파일은 수집 종료 때만 저장됨)
+        if self.event_callback is None:
+            return
+        events = []
+        if tracker_result.get("lift_detected"):
+            events.append("frying_lift_detected")
+        if tracker_result.get("completion_detected") and not self._completion_logged:
+            self._completion_logged = True
+            events.append("frying_completion_detected")
+        for event in events:
+            try:
+                self.event_callback(
+                    event,
+                    pot=self.pot_id + 1,
+                    food_type=self.tracker.food_type,
+                    lift_count=int(tracker_result.get("lift_count", 0)),
+                    running_time=round(float(tracker_result.get("running_time", 0) or 0), 1),
+                    target_time=self.tracker.target_time,
+                    color_delta=round(float(tracker_result.get("color_delta", 0) or 0), 2),
+                    area_ratio=round(float(seg_result.food_area_ratio), 4),
+                    brown_ratio=round(float(seg_result.color_features.brown_ratio), 4),
+                    golden_ratio=round(float(seg_result.color_features.golden_ratio), 4),
+                )
+            except Exception as e:
+                print(f"[Frying AI] pot{self.pot_id} 이벤트 기록 오류: {e}")
 
     def get_result(self) -> dict:
         with self.result_lock:
@@ -1505,8 +1536,6 @@ class Jetson2Web:
         self.human_workers: Dict[str, HumanSafetyWorker] = {}
         self._init_ai_workers()
         self._init_human_workers()
-        self.lift_tracker_pot1 = LiftEventTracker("POT1", config)
-        self.lift_tracker_pot2 = LiftEventTracker("POT2", config)
 
         self.mqtt_client: Optional[MQTTClient] = None
         self._init_mqtt()
@@ -1701,6 +1730,8 @@ class Jetson2Web:
                 self.frying_workers[0] = FryingAIWorker(0, self.cameras[0], self.config)
             if self.cameras.get(1) is not None:
                 self.frying_workers[1] = FryingAIWorker(1, self.cameras[1], self.config)
+            for worker in self.frying_workers.values():
+                worker.event_callback = self._log_ops_event
 
         if self.config.get("observe_enabled", True):
             left_seg = self.config.get("observe_left_seg_model", "")
@@ -2722,11 +2753,11 @@ class Jetson2Web:
         self.pot1_collecting = True
         self.pot1_metadata = []
 
-        target_time = self._get_target_time(self.pot1_target_time)
-        self.lift_tracker_pot1.start_session(self.pot1_session_id, food, target_time)
-
-        self._set_frying_enabled(True)
-        self._set_observe_enabled(True)
+        # 설정 화면에서 끈 AI 는 수집이 시작돼도 다시 켜지 않음
+        if self.config.get("frying_enabled", True):
+            self._set_frying_enabled(True)
+        if self.config.get("observe_enabled", True):
+            self._set_observe_enabled(True)
 
         print(f"[POT1 수집] 시작: {self.pot1_session_id} | 음식: {food}")
 
@@ -2738,11 +2769,9 @@ class Jetson2Web:
         self._cancel_discharge_idle_timer(1)
         duration = (datetime.now() - self.pot1_start_time).total_seconds() if self.pot1_start_time else 0
 
-        self.lift_tracker_pot1.stop_session()
-        try:
-            self.lift_tracker_pot1.save_session_data(self.pot1_session_dir)
-        except Exception as e:
-            print(f"[POT1 수집] Lift data 저장 오류: {e}")
+        lift_summary = self._save_lift_data(
+            1, self.pot1_session_dir, self.pot1_session_id, self.pot1_start_time
+        )
 
         session_info = {
             "pot": "pot1",
@@ -2758,6 +2787,7 @@ class Jetson2Web:
             "total_frames_saved": self.pot1_frame_counter,
             "raw_metadata": list(self.pot1_metadata),
             "metadata_count": len(self.pot1_metadata),
+            "lift_summary": lift_summary,
         }
         info_path = os.path.join(self.pot1_session_dir, "session_info.json")
         threading.Thread(target=self._save_session_info, args=(info_path, session_info), daemon=True).start()
@@ -2795,11 +2825,11 @@ class Jetson2Web:
         self.pot2_collecting = True
         self.pot2_metadata = []
 
-        target_time = self._get_target_time(self.pot2_target_time)
-        self.lift_tracker_pot2.start_session(self.pot2_session_id, food, target_time)
-
-        self._set_frying_enabled(True)
-        self._set_observe_enabled(True)
+        # 설정 화면에서 끈 AI 는 수집이 시작돼도 다시 켜지 않음
+        if self.config.get("frying_enabled", True):
+            self._set_frying_enabled(True)
+        if self.config.get("observe_enabled", True):
+            self._set_observe_enabled(True)
 
         print(f"[POT2 수집] 시작: {self.pot2_session_id} | 음식: {food}")
 
@@ -2811,11 +2841,9 @@ class Jetson2Web:
         self._cancel_discharge_idle_timer(2)
         duration = (datetime.now() - self.pot2_start_time).total_seconds() if self.pot2_start_time else 0
 
-        self.lift_tracker_pot2.stop_session()
-        try:
-            self.lift_tracker_pot2.save_session_data(self.pot2_session_dir)
-        except Exception as e:
-            print(f"[POT2 수집] Lift data 저장 오류: {e}")
+        lift_summary = self._save_lift_data(
+            2, self.pot2_session_dir, self.pot2_session_id, self.pot2_start_time
+        )
 
         session_info = {
             "pot": "pot2",
@@ -2831,6 +2859,7 @@ class Jetson2Web:
             "total_frames_saved": self.pot2_frame_counter,
             "raw_metadata": list(self.pot2_metadata),
             "metadata_count": len(self.pot2_metadata),
+            "lift_summary": lift_summary,
         }
         info_path = os.path.join(self.pot2_session_dir, "session_info.json")
         threading.Thread(target=self._save_session_info, args=(info_path, session_info), daemon=True).start()
@@ -2847,6 +2876,62 @@ class Jetson2Web:
             self.pot2_taltal_timer.cancel()
             self.pot2_taltal_timer = None
         self.pot2_taltal_pending = False
+
+    def _save_lift_data(self, pot: int, session_dir: str, session_id: str, start_dt) -> dict:
+        """실제 판정에 쓰인 FryingAIWorker 의 tracker 기록을 세션 폴더에 저장하고 요약을 돌려줌."""
+        worker = self.frying_workers.get(pot - 1)
+        tracker = worker.tracker if worker else None
+        start_ts = start_dt.timestamp() if start_dt else 0.0
+        # tracker 는 food_type 메시지 때만 새로 시작됨 → 이 수집 전에 시작된 것이면 이전 조리 기록이 섞인 것
+        matched = bool(tracker and tracker.session_id and tracker.start_time
+                       and tracker.start_time >= start_ts - 1.0)
+        summary = {
+            "tracker_session_id": tracker.session_id if tracker else None,
+            "tracker_started_this_session": matched,
+            "lift_count": len(tracker.lift_events) if tracker else 0,
+            "completion_detected": bool(tracker.completion_detected) if tracker else False,
+            "completion_time": (
+                datetime.fromtimestamp(tracker.completion_time).strftime("%Y-%m-%d %H:%M:%S")
+                if tracker and tracker.completion_time else None
+            ),
+        }
+        if tracker is None or not tracker.session_id:
+            print(f"[POT{pot} 수집] 튀김 AI 판정 세션 없음 → 탈탈 기록 저장 안 함")
+            return summary
+        if not matched:
+            print(f"[POT{pot} 수집] 튀김 AI 판정이 이번 조리에서 새로 시작되지 않음 (이전 기록 포함 가능)")
+        try:
+            tracker.save_session_data(
+                session_dir,
+                file_stem=session_id,
+                extra={"collection_session_id": session_id, "tracker_started_this_session": matched},
+            )
+        except Exception as e:
+            print(f"[POT{pot} 수집] Lift data 저장 오류: {e}")
+        return summary
+
+    def _frying_ai_snapshot(self, pot: int) -> dict:
+        """사진 메타에 함께 남길 그 순간의 AI 판정 값."""
+        side = "left" if pot == 1 else "right"
+        snap = {
+            "frying_running": bool(self.frying_running),
+            "observe_state": getattr(self, f"observe_{side}_state", None),
+            "observe_effective": getattr(self, f"observe_{side}_effective", None),
+            "human_gate": getattr(self, f"human_gate_{side}", None),
+        }
+        worker = self.frying_workers.get(pot - 1)
+        if worker:
+            r = worker.get_result()
+            last = float(r.get("last_update", 0) or 0)
+            snap.update({
+                "area_ratio": round(float(r.get("area_ratio", 0) or 0), 4),
+                "brown_ratio": round(float(r.get("brown_ratio", 0) or 0), 4),
+                "golden_ratio": round(float(r.get("golden_ratio", 0) or 0), 4),
+                "lift_count": int(r.get("lift_count", 0) or 0),
+                "completion_detected": bool(r.get("completion_detected", False)),
+                "result_age_sec": round(time.time() - last, 1) if last else None,
+            })
+        return snap
 
     def _save_session_info(self, info_path: str, session_info: dict) -> None:
         try:
@@ -2872,6 +2957,7 @@ class Jetson2Web:
         meta_path = os.path.join(self.pot1_session_dir, "meta", f"meta_{timestamp}.json")
         os.makedirs(os.path.dirname(meta_path), exist_ok=True)
         meta_data = {"timestamp": full_timestamp, "frame_id": timestamp, "pot": "pot1", **self.pot1_robot_status}
+        meta_data["ai"] = self._frying_ai_snapshot(1)
         try:
             with open(meta_path, "w", encoding="utf-8") as f:
                 json.dump(meta_data, f, ensure_ascii=False)
@@ -2894,6 +2980,7 @@ class Jetson2Web:
         meta_path = os.path.join(self.pot2_session_dir, "meta", f"meta_{timestamp}.json")
         os.makedirs(os.path.dirname(meta_path), exist_ok=True)
         meta_data = {"timestamp": full_timestamp, "frame_id": timestamp, "pot": "pot2", **self.pot2_robot_status}
+        meta_data["ai"] = self._frying_ai_snapshot(2)
         try:
             with open(meta_path, "w", encoding="utf-8") as f:
                 json.dump(meta_data, f, ensure_ascii=False)

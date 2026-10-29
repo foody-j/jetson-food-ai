@@ -265,12 +265,13 @@ class LiftEventTracker:
                   f"시간={running_time:.0f}초 (완료허용={ready_time:.0f}초, 목표={self.target_time}초), "
                   f"색변화={color_delta:.1f} (임계값={self.color_change_threshold})")
 
-    def save_session_data(self, save_dir: str) -> str:
-        """세션 데이터 저장"""
+    def save_session_data(self, save_dir: str, file_stem: str = None, extra: dict = None) -> str:
+        """세션 데이터 저장 (file_stem: 파일 이름 앞부분, 기본은 session_id / extra: 추가 기록)"""
         if not self.session_id:
             return None
 
         os.makedirs(save_dir, exist_ok=True)
+        lift_events = list(self.lift_events)  # AI 스레드가 계속 추가하므로 복사본으로 저장
 
         data = {
             'session_id': self.session_id,
@@ -280,17 +281,19 @@ class LiftEventTracker:
             'start_time': datetime.fromtimestamp(self.start_time).strftime("%Y-%m-%d %H:%M:%S"),
             'completion_detected': self.completion_detected,
             'completion_time': datetime.fromtimestamp(self.completion_time).strftime("%Y-%m-%d %H:%M:%S") if self.completion_time else None,
-            'lift_count': len(self.lift_events),
+            'lift_count': len(lift_events),
             'baseline_color': self.baseline_color,
-            'lift_events': [asdict(event) for event in self.lift_events],
+            'lift_events': [asdict(event) for event in lift_events],
             'config': {
                 'lift_area_threshold': self.lift_area_threshold,
                 'color_change_threshold': self.color_change_threshold,
                 'lift_cooldown_sec': self.lift_cooldown_sec
             }
         }
+        if extra:
+            data.update(extra)
 
-        filename = f"{self.session_id}_lift_events.json"
+        filename = f"{file_stem or self.session_id}_lift_events.json"
         filepath = os.path.join(save_dir, filename)
 
         with open(filepath, 'w', encoding='utf-8') as f:
