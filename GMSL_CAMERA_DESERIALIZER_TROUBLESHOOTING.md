@@ -290,6 +290,7 @@
    * 해결(설치 없이): `sudo env PYTHONPATH=$HOME/.local/lib/python3.10/site-packages ...` — 스크립트 내부 `python3` 호출에도 상속됨. 영구 해결은 `sudo apt-get install -y python3-serial`.
 2. **USB 릴레이 상태 조회 무응답**: 포트(`ttyUSB0`, CH340, USB 경로 `1-2.2`)는 열리지만 `Status response: (no response)`. `--init-delay 3`으로도 동일.
    * 다른 젯슨에서 같은 모델이 `CH1: OFF`로 응답하므로 모델 문제는 아님. 보드 MCU 멈춤/접촉 불량 의심, 현장 확인 필요.
+   * 2026-10-29 현장 확인: USB는 정상 체결, `칩 리셋 (릴레이 무시)` 실행 중에도 **딸깍 소리 없음** → 차단/인가 명령도 동작하지 않음 (상태 응답만의 문제가 아님). USB 재체결로도 안 되면 릴레이 보드 교체 필요. 교체 전까지는 12V 차단 없이 I2C 칩 리셋만으로 운영 (NC 배선이라 12V는 계속 인가, 10-29 기준 칩 리셋만으로 복구 정상).
    * 진동센서는 FTDI(`ttyUSB1`)이며 `jetson2-web`이 사용 중 — 포트 충돌 없음.
 
 #### 해결
