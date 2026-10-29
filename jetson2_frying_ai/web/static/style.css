@@ -453,6 +453,72 @@ body.has-alert .camera-box img {
     word-break: break-word;
 }
 
+/* 데이터 저장 위치 */
+.storage-group {
+    margin: 12px 0 4px;
+    color: var(--navy);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.storage-group:first-child {
+    margin-top: 0;
+}
+
+.storage-row {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 12px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--neutral-surface);
+}
+
+.storage-label {
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.storage-body {
+    min-width: 0;
+}
+
+.storage-body code {
+    font-family: var(--mono);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.storage-path {
+    color: var(--ink);
+}
+
+.storage-current {
+    margin-top: 2px;
+    color: var(--purple);
+    font-size: 12px;
+}
+
+.storage-current code {
+    color: var(--purple);
+}
+
+.storage-missing {
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: var(--neutral-surface);
+    color: var(--gray-text);
+    font-size: 11px;
+}
+
+.storage-desc {
+    margin-top: 2px;
+    color: var(--gray-text);
+    font-size: 12px;
+}
+
+
 @media (max-width: 600px) {
     .grid,
     .snapshot-grid {
@@ -462,5 +528,10 @@ body.has-alert .camera-box img {
     .control-group {
         grid-template-columns: 1fr;
         gap: 6px;
+    }
+
+    .storage-row {
+        grid-template-columns: 1fr;
+        gap: 2px;
     }
 }

@@ -9,7 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import camera_recovery, settings
+from . import camera_recovery, settings, storage
 from .auto_recovery import AutoRecovery
 from .mjpeg import mjpeg_stream
 
@@ -153,6 +153,10 @@ def create_app(
     @app.get("/api/config")
     async def get_config():
         return JSONResponse(config)
+
+    @app.get("/api/storage")
+    async def get_storage():
+        return JSONResponse(await run_in_threadpool(storage.storage_paths, state))
 
     recovery_cooldown = int(config.get("camera_recovery_cooldown_sec", 300))
 

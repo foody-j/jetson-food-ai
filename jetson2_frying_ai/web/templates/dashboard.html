@@ -187,6 +187,11 @@
         <div class="snapshot-metrics" id="vibration-live-metrics">-</div>
     </section>
 
+    <section class="panel" id="storage-panel">
+        <div class="section-label">데이터 저장 위치</div>
+        <div class="storage-list" id="storage-list">-</div>
+    </section>
+
     <script>
         async function postJSON(url, data) {
             try {
@@ -468,6 +473,48 @@
             el.textContent = text;
             el.hidden = !text;
             document.title = text ? `튀김 AI 모니터 · ${text}` : '튀김 AI 모니터';
+        }
+
+        function escapeHtml(text) {
+            return String(text ?? '').replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
+        async function loadStorage() {
+            let items;
+            try {
+                const res = await fetch('/api/storage');
+                items = await res.json();
+            } catch (e) {
+                return;  // 웹 재시작 중이면 다음 주기에 다시
+            }
+            let html = '';
+            let group = '';
+            for (const it of items) {
+                if (it.group !== group) {
+                    group = it.group;
+                    html += `<div class="storage-group">${escapeHtml(group)}</div>`;
+                }
+                const missing = it.exists ? '' : '<span class="storage-missing">아직 없음</span>';
+                let current = missing ? `<div class="storage-current">${missing}</div>` : '';
+                if (it.current) {
+                    // 위 폴더 경로와 겹치는 앞부분은 빼고 표시
+                    const prefix = it.path.replace(/\/$/, '') + '/';
+                    const rest = it.current.startsWith(prefix) ? it.current.slice(prefix.length) : it.current;
+                    const label = it.current_kind === 'session' ? '기록 중' : '오늘';
+                    current = `<div class="storage-current">${label}: <code>${escapeHtml(rest)}</code>${missing}</div>`;
+                }
+                html += `<div class="storage-row">
+                    <div class="storage-label">${escapeHtml(it.label)}</div>
+                    <div class="storage-body">
+                        <code class="storage-path">${escapeHtml(it.path)}</code>
+                        ${current}
+                        <div class="storage-desc">${escapeHtml(it.desc)}</div>
+                    </div>
+                </div>`;
+            }
+            document.getElementById('storage-list').innerHTML = html;
         }
 
         async function loadDashboardConfig() {
@@ -809,6 +856,8 @@
         }
 
         loadDashboardConfig();
+        loadStorage();
+        setInterval(loadStorage, 10000);  // 수집 시작·종료와 날짜 변경 반영
         setInterval(updateStatus, 2000);
         updateStatus();
         refreshRecovery();
